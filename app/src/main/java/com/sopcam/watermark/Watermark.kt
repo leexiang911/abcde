@@ -24,65 +24,101 @@ import kotlin.math.min
 enum class Anchor { TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT }
 
 /**
- * 构图方向锁。
- * AUTO      —— 跟随手机重力，横拿出横图、竖拿出竖图
- * PORTRAIT  —— 无论怎么拿，成片永远是竖构图
- * LANDSCAPE —— 无论怎么拿，成片永远是横构图（检修台上单手斜举时最有用）
+ * 手机的哪条边，是成片的「顶部」。
+ *
+ * 比「锁横屏 / 锁竖屏」直观：直接指定成片正立后哪边朝上，
+ * 而且四个方向刚好对上 CameraX 的四个 targetRotation。
+ *
+ * AUTO 时跟随重力，等效方向由 OrientationController 实时算出来。
  */
-enum class OrientationLock { AUTO, PORTRAIT, LANDSCAPE }
+enum class TopEdge(val surfaceRotation: Int) {
+    AUTO(-1),
+    TOP(Surface.ROTATION_0),
+    LEFT(Surface.ROTATION_90),
+    BOTTOM(Surface.ROTATION_180),
+    RIGHT(Surface.ROTATION_270);
+
+    companion object {
+        fun of(surfaceRotation: Int): TopEdge = when (surfaceRotation) {
+            Surface.ROTATION_90 -> LEFT
+            Surface.ROTATION_180 -> BOTTOM
+            Surface.ROTATION_270 -> RIGHT
+            else -> TOP
+        }
+    }
+}
 
 /**
- * 把方向锁翻译成 CameraX 的 targetRotation。
+ * 预览层要把水印转多少度，才跟成片一致。
  *
- * 用法：
- *   val oc = OrientationController(ctx) { rot -> imageCapture.targetRotation = rot }
- *   oc.lock = OrientationLock.LANDSCAPE
- *   oc.enable()  / oc.disable()
+ * 推导：成片顶部指向手机左边时，成片的「右」方向就是手机的「上」，
+ * 文字沿成片右向排列 = 在屏幕上从下往上读 = 逆时针 90°。
+ * 四个方向刚好是 0/90/180/270 的整数圈，用象限数表示最不容易写错。
+ */
+fun TopEdge.quarterTurns(): Int = when (this) {
+    TopEdge.TOP, TopEdge.AUTO -> 0
+    TopEdge.RIGHT -> 1
+    TopEdge.BOTTOM -> 2
+    TopEdge.LEFT -> 3
+}
+
+/**
+ * 成片上的某个角，落在预览的哪个角。
  *
- * 锁定模式下监听器仍然运行但直接返回固定值，这样切回 AUTO 时能立刻拿到当前角度，
- * 不用等下一次重力变化。
+ * 四个角按顺时针排成环：左上 → 右上 → 右下 → 左下，
+ * 成片每转一个象限，环上就走一格。返回值是环上的下标。
+ */
+fun Anchor.previewCornerIndex(edge: TopEdge): Int {
+    val cw = listOf(Anchor.TOP_LEFT, Anchor.TOP_RIGHT, Anchor.BOTTOM_RIGHT, Anchor.BOTTOM_LEFT)
+    return (cw.indexOf(this) + edge.quarterTurns()) % 4
+}
+
+/**
+ * 把方向设置翻译成 CameraX 的 targetRotation。
+ *
+ * 锁定模式下监听器照常运行，只是解析时直接返回固定值——
+ * 这样切回 AUTO 能立刻拿到当前角度，不用等下一次重力变化。
  */
 class OrientationController(
     context: Context,
     private val onRotationChanged: (Int) -> Unit,
 ) {
-    var lock: OrientationLock = OrientationLock.AUTO
+    var topEdge: TopEdge = TopEdge.AUTO
         set(value) {
             field = value
-            onRotationChanged(resolve(lastDeviceRotation))
+            emit(resolve(lastDeviceRotation))
         }
 
+    /** 当前实际生效的 targetRotation，AUTO 时跟着重力变 */
+    var effectiveRotation: Int = Surface.ROTATION_0
+        private set
+
     private var lastDeviceRotation = Surface.ROTATION_0
-    private var lastEmitted = Int.MIN_VALUE
 
     private val listener = object : OrientationEventListener(
         context, SensorManager.SENSOR_DELAY_NORMAL
     ) {
         override fun onOrientationChanged(orientation: Int) {
             if (orientation == ORIENTATION_UNKNOWN) return
-            // 45° 死区，避免临界角来回抖动
+            // 45 度死区，避免临界角来回抖动
             lastDeviceRotation = when (orientation) {
                 in 45 until 135 -> Surface.ROTATION_270
                 in 135 until 225 -> Surface.ROTATION_180
                 in 225 until 315 -> Surface.ROTATION_90
                 else -> Surface.ROTATION_0
             }
-            val resolved = resolve(lastDeviceRotation)
-            if (resolved != lastEmitted) {
-                lastEmitted = resolved
-                onRotationChanged(resolved)
-            }
+            emit(resolve(lastDeviceRotation))
         }
     }
 
-    private fun resolve(deviceRotation: Int): Int = when (lock) {
-        OrientationLock.AUTO -> deviceRotation
-        OrientationLock.PORTRAIT -> Surface.ROTATION_0
-        // ROTATION_90 = 手机左转横拿的构图；机身右转横拿请用 ROTATION_270
-        OrientationLock.LANDSCAPE ->
-            if (deviceRotation == Surface.ROTATION_270) Surface.ROTATION_270
-            else Surface.ROTATION_90
+    private fun emit(rotation: Int) {
+        if (rotation == effectiveRotation) return
+        effectiveRotation = rotation
+        onRotationChanged(rotation)
     }
+
+    private fun resolve(deviceRotation: Int): Int =
+        if (topEdge == TopEdge.AUTO) deviceRotation else topEdge.surfaceRotation
 
     fun enable() { if (listener.canDetectOrientation()) listener.enable() }
     fun disable() = listener.disable()

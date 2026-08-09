@@ -31,7 +31,7 @@ import com.sopcam.ui.SetupScreen
 import com.sopcam.ui.TemplateEditScreen
 import com.sopcam.watermark.Anchor
 import com.sopcam.watermark.OrientationController
-import com.sopcam.watermark.OrientationLock
+import com.sopcam.watermark.TopEdge
 import com.sopcam.watermark.WatermarkContent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -59,7 +59,9 @@ class MainActivity : ComponentActivity() {
     private var shotCounts by mutableStateOf<Map<Int, Int>>(emptyMap())
 
     private var anchor by mutableStateOf(Anchor.BOTTOM_LEFT)
-    private var lock by mutableStateOf(OrientationLock.AUTO)
+    private var topEdge by mutableStateOf(TopEdge.AUTO)
+    private var effectiveEdge by mutableStateOf(TopEdge.TOP)
+    private var dialOpen by mutableStateOf(false)
     private var queueDepth by mutableIntStateOf(0)
     private var lastSaved by mutableStateOf<String?>(null)
 
@@ -109,7 +111,10 @@ class MainActivity : ComponentActivity() {
         )
 
         imageCapture = CameraBinder.buildImageCapture(Surface.ROTATION_0)
-        orientation = OrientationController(this) { rot -> imageCapture.targetRotation = rot }
+        orientation = OrientationController(this) { rot ->
+            imageCapture.targetRotation = rot
+            effectiveEdge = TopEdge.of(rot)
+        }
 
         setContent {
             if (!hasPermission) {
@@ -160,14 +165,20 @@ class MainActivity : ComponentActivity() {
                     currentIndex = stepIndex,
                     shotCounts = shotCounts,
                     anchor = anchor,
-                    lock = lock,
+                    edge = topEdge,
+                    effectiveEdge = effectiveEdge,
+                    dialOpen = dialOpen,
+                    watermarkHeadline = watermarkHeadline(),
+                    watermarkLines = watermarkLines(System.currentTimeMillis()),
                     queueDepth = queueDepth,
                     lastSaved = lastSaved,
                     onStepSelect = { stepIndex = it },
                     onAnchorToggle = { anchor = anchor.next() },
-                    onLockToggle = {
-                        lock = lock.next()
-                        orientation.lock = lock
+                    onDialToggle = { dialOpen = !dialOpen },
+                    onEdgePick = {
+                        topEdge = it
+                        orientation.topEdge = it
+                        dialOpen = false
                     },
                     onShutter = ::capture,
                     onExit = {
@@ -178,6 +189,20 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    /** 预览层和烧录层共用，保证所见即所得 */
+    private fun watermarkHeadline(): String? = currentStep?.let {
+        "${it.order.toString().padStart(2, '0')} · ${it.label()}"
+    }
+
+    private fun watermarkLines(at: Long): List<String> = buildList {
+        add(stampFmt.format(Date(at)))
+        val id = listOfNotNull(
+            workOrder.takeIf { it.isNotBlank() }?.let { "工单 $it" },
+            serialNo.takeIf { it.isNotBlank() }?.let { "SN $it" }
+        ).joinToString("  ")
+        if (id.isNotBlank()) add(id)
     }
 
     private fun persist() {
@@ -210,19 +235,7 @@ class MainActivity : ComponentActivity() {
             pipeline = pipeline,
             fileName = FileNaming.build(step, taken + 1, now),
             relativePath = FileNaming.relativePath(workOrder, serialNo, now),
-            content = WatermarkContent(
-                headline = step?.let {
-                    "${it.order.toString().padStart(2, '0')} · ${it.label()}"
-                },
-                lines = buildList {
-                    add(stampFmt.format(Date(now)))
-                    val id = listOfNotNull(
-                        workOrder.takeIf { it.isNotBlank() }?.let { "工单 $it" },
-                        serialNo.takeIf { it.isNotBlank() }?.let { "SN $it" }
-                    ).joinToString("  ")
-                    if (id.isNotBlank()) add(id)
-                }
-            ),
+            content = WatermarkContent(watermarkHeadline(), watermarkLines(now)),
             anchor = anchor
         )
 
@@ -257,10 +270,4 @@ private fun Anchor.next(): Anchor = when (this) {
     Anchor.BOTTOM_RIGHT -> Anchor.TOP_RIGHT
     Anchor.TOP_RIGHT -> Anchor.TOP_LEFT
     Anchor.TOP_LEFT -> Anchor.BOTTOM_LEFT
-}
-
-private fun OrientationLock.next(): OrientationLock = when (this) {
-    OrientationLock.AUTO -> OrientationLock.PORTRAIT
-    OrientationLock.PORTRAIT -> OrientationLock.LANDSCAPE
-    OrientationLock.LANDSCAPE -> OrientationLock.AUTO
 }

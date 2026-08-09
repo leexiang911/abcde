@@ -36,7 +36,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.sopcam.sop.SopStep
 import com.sopcam.watermark.Anchor
-import com.sopcam.watermark.OrientationLock
+import com.sopcam.watermark.TopEdge
 
 /*
  * 车间工具，不是消费相机：
@@ -52,12 +52,17 @@ fun CameraScreen(
     currentIndex: Int,
     shotCounts: Map<Int, Int>,
     anchor: Anchor,
-    lock: OrientationLock,
+    edge: TopEdge,
+    effectiveEdge: TopEdge,
+    dialOpen: Boolean,
+    watermarkHeadline: String?,
+    watermarkLines: List<String>,
     queueDepth: Int,
     lastSaved: String?,
     onStepSelect: (Int) -> Unit,
     onAnchorToggle: () -> Unit,
-    onLockToggle: () -> Unit,
+    onDialToggle: () -> Unit,
+    onEdgePick: (TopEdge) -> Unit,
     onShutter: () -> Unit,
     onExit: () -> Unit,
     bindPreview: (PreviewView) -> Unit,
@@ -75,6 +80,9 @@ fun CameraScreen(
             modifier = Modifier.fillMaxSize()
         )
 
+        WatermarkPreview(watermarkHeadline, watermarkLines, anchor, effectiveEdge)
+        TopEdgeMarker(edge, effectiveEdge)
+
         Column(Modifier.align(Alignment.TopCenter).fillMaxWidth()) {
             Spacer(Modifier.height(36.dp))
 
@@ -84,16 +92,6 @@ fun CameraScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Tag("收工", onExit)
-                if (lock != OrientationLock.AUTO) {
-                    Text(
-                        if (lock == OrientationLock.LANDSCAPE) "成片横向" else "成片竖向",
-                        color = Amber,
-                        fontSize = 12.sp,
-                        modifier = Modifier
-                            .background(Panel.copy(alpha = 0.9f), RoundedCornerShape(4.dp))
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
-                    )
-                }
             }
 
             if (steps.isNotEmpty()) {
@@ -116,12 +114,17 @@ fun CameraScreen(
             }
         }
 
+        if (dialOpen) DialScrim(onDialToggle)
+
         ControlBar(
             anchor = anchor,
-            lock = lock,
+            edge = edge,
+            effectiveEdge = effectiveEdge,
+            dialOpen = dialOpen,
             queueDepth = queueDepth,
             onAnchorToggle = onAnchorToggle,
-            onLockToggle = onLockToggle,
+            onDialToggle = onDialToggle,
+            onEdgePick = onEdgePick,
             onShutter = onShutter,
             modifier = Modifier.align(Alignment.BottomCenter)
         )
@@ -199,10 +202,13 @@ private fun StepLadder(
 @Composable
 private fun ControlBar(
     anchor: Anchor,
-    lock: OrientationLock,
+    edge: TopEdge,
+    effectiveEdge: TopEdge,
+    dialOpen: Boolean,
     queueDepth: Int,
     onAnchorToggle: () -> Unit,
-    onLockToggle: () -> Unit,
+    onDialToggle: () -> Unit,
+    onEdgePick: (TopEdge) -> Unit,
     onShutter: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -217,14 +223,12 @@ private fun ControlBar(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Tag(
-                when (lock) {
-                    OrientationLock.AUTO -> "方向 自动"
-                    OrientationLock.PORTRAIT -> "方向 锁竖屏"
-                    OrientationLock.LANDSCAPE -> "方向 锁横屏"
-                },
-                onLockToggle,
-                highlighted = lock != OrientationLock.AUTO
+            OrientationDial(
+                edge = edge,
+                effective = effectiveEdge,
+                expanded = dialOpen,
+                onToggle = onDialToggle,
+                onPick = onEdgePick
             )
             if (queueDepth > 0) {
                 Text(
