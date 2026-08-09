@@ -131,7 +131,7 @@ class CapturePipeline(
     }
 
     fun submit(shot: PendingShot) {
-        if (queue.trySend(shot).isFailure) onError(IllegalStateException("落盘队列已满，请稍等"))
+        queue.trySend(shot).onFailure { onError(IllegalStateException("落盘队列已满，请稍等")) }
     }
 
     fun shutdown() {
@@ -203,6 +203,7 @@ fun ImageCapture.shoot(
     onShutter: () -> Unit = {},
 ) {
     takePicture(pipeline.captureExecutor, object : ImageCapture.OnImageCapturedCallback() {
+        override fun onCaptureStarted() = onShutter()
 
         override fun onCaptureSuccess(image: ImageProxy) {
             val buf = image.planes[0].buffer
