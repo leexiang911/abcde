@@ -50,7 +50,7 @@ import com.sopcam.watermark.quarterTurns
  */
 
 /** 哪个面板展开着 */
-enum class Panel { NONE, ORIENTATION, ANCHOR }
+enum class OverlayPanel { NONE, ORIENTATION, ANCHOR }
 
 @Composable
 fun CameraScreen(
@@ -60,13 +60,13 @@ fun CameraScreen(
     anchor: Anchor,
     edge: TopEdge,
     effectiveEdge: TopEdge,
-    panel: Panel,
+    panel: OverlayPanel,
     watermarkHeadline: String?,
     watermarkLines: List<String>,
     queueDepth: Int,
     lastSaved: String?,
     onStepSelect: (Int) -> Unit,
-    onPanelChange: (Panel) -> Unit,
+    onPanelChange: (OverlayPanel) -> Unit,
     onAnchorPick: (Anchor) -> Unit,
     onEdgePick: (TopEdge) -> Unit,
     onShutter: () -> Unit,
@@ -145,28 +145,28 @@ fun CameraScreen(
                 edge = edge,
                 effectiveEdge = effectiveEdge,
                 onOrientationTap = {
-                    onPanelChange(if (panel == Panel.ORIENTATION) Panel.NONE else Panel.ORIENTATION)
+                    onPanelChange(if (panel == OverlayPanel.ORIENTATION) OverlayPanel.NONE else OverlayPanel.ORIENTATION)
                 },
                 onAnchorTap = {
-                    onPanelChange(if (panel == Panel.ANCHOR) Panel.NONE else Panel.ANCHOR)
+                    onPanelChange(if (panel == OverlayPanel.ANCHOR) OverlayPanel.NONE else OverlayPanel.ANCHOR)
                 },
                 onShutter = onShutter
             )
         }
 
-        if (panel != Panel.NONE) {
-            DialScrim { onPanelChange(Panel.NONE) }
+        if (panel != OverlayPanel.NONE) {
+            DialScrim { onPanelChange(OverlayPanel.NONE) }
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 when (panel) {
-                    Panel.ORIENTATION -> OrientationDialPanel(edge) {
+                    OverlayPanel.ORIENTATION -> OrientationDialPanel(edge) {
                         onEdgePick(it)
-                        onPanelChange(Panel.NONE)
+                        onPanelChange(OverlayPanel.NONE)
                     }
-                    Panel.ANCHOR -> AnchorGridPanel(anchor, effectiveEdge) {
+                    OverlayPanel.ANCHOR -> AnchorGridPanel(anchor, effectiveEdge) {
                         onAnchorPick(it)
-                        onPanelChange(Panel.NONE)
+                        onPanelChange(OverlayPanel.NONE)
                     }
-                    Panel.NONE -> Unit
+                    OverlayPanel.NONE -> Unit
                 }
             }
         }

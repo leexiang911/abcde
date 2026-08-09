@@ -26,7 +26,7 @@ import com.sopcam.sop.SopStep
 import com.sopcam.sop.SopStore
 import com.sopcam.sop.SopTemplate
 import com.sopcam.ui.CameraScreen
-import com.sopcam.ui.Panel
+import com.sopcam.ui.OverlayPanel
 import com.sopcam.ui.PermissionGate
 import com.sopcam.ui.SetupScreen
 import com.sopcam.ui.TemplateEditScreen
@@ -62,7 +62,7 @@ class MainActivity : ComponentActivity() {
     private var anchor by mutableStateOf(Anchor.BOTTOM_LEFT)
     private var topEdge by mutableStateOf(TopEdge.AUTO)
     private var effectiveEdge by mutableStateOf(TopEdge.TOP)
-    private var panel by mutableStateOf(Panel.NONE)
+    private var panel by mutableStateOf(OverlayPanel.NONE)
     private var queueDepth by mutableIntStateOf(0)
     private var lastSaved by mutableStateOf<String?>(null)
 
