@@ -131,7 +131,7 @@ class CapturePipeline(
     }
 
     fun submit(shot: PendingShot) {
-        queue.trySend(shot).onFailure { onError(IllegalStateException("落盘队列已满，请稍等")) }
+        if (queue.trySend(shot).isFailure) onError(IllegalStateException("落盘队列已满，请稍等"))
     }
 
     fun shutdown() {
