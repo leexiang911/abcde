@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 全屏深色，界面本身不用系统主题的任何颜色 -->
+    <style name="Theme.SopCam" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#000000</item>
+        <item name="android:navigationBarColor">#000000</item>
+        <item name="android:windowBackground">#0E1114</item>
+    </style>
+</resources>
