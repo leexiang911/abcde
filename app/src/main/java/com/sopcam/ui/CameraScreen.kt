@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -27,6 +28,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -37,14 +39,18 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.sopcam.sop.SopStep
 import com.sopcam.watermark.Anchor
 import com.sopcam.watermark.TopEdge
+import com.sopcam.watermark.quarterTurns
 
 /*
  * 车间工具，不是消费相机：
- *   · 深色到底，唯一的暖色（琥珀）只标当前步骤和生效中的锁
- *   · 可点区域 >= 56dp，戴手套单手能按中
- *   · 签名元素是顶部的步骤梯 —— 已拍够 / 当前 / 待拍 三态一眼可辨，
- *     它同时是进度条、导航器和拍摄提示，取代了传统相机的模式转盘
+ *   · 取景框严格按 3:4 摆，等于成片范围，水印画在框内不会被控制条压住
+ *   · 深色到底，唯一的暖色只标当前步骤和生效中的设置
+ *   · 按钮文字跟着成片方向转，横过来拿也不用歪头读
+ *   · 签名元素是顶部的步骤梯 —— 进度条、导航器和拍摄提示三合一
  */
+
+/** 哪个面板展开着 */
+enum class Panel { NONE, ORIENTATION, ANCHOR }
 
 @Composable
 fun CameraScreen(
@@ -54,14 +60,14 @@ fun CameraScreen(
     anchor: Anchor,
     edge: TopEdge,
     effectiveEdge: TopEdge,
-    dialOpen: Boolean,
+    panel: Panel,
     watermarkHeadline: String?,
     watermarkLines: List<String>,
     queueDepth: Int,
     lastSaved: String?,
     onStepSelect: (Int) -> Unit,
-    onAnchorToggle: () -> Unit,
-    onDialToggle: () -> Unit,
+    onPanelChange: (Panel) -> Unit,
+    onAnchorPick: (Anchor) -> Unit,
     onEdgePick: (TopEdge) -> Unit,
     onShutter: () -> Unit,
     onExit: () -> Unit,
@@ -69,21 +75,8 @@ fun CameraScreen(
 ) {
     Box(Modifier.fillMaxSize().background(Ink)) {
 
-        AndroidView(
-            factory = { ctx ->
-                PreviewView(ctx).apply {
-                    implementationMode = PreviewView.ImplementationMode.PERFORMANCE
-                    scaleType = PreviewView.ScaleType.FILL_CENTER
-                    bindPreview(this)
-                }
-            },
-            modifier = Modifier.fillMaxSize()
-        )
+        Column(Modifier.fillMaxSize()) {
 
-        WatermarkPreview(watermarkHeadline, watermarkLines, anchor, effectiveEdge)
-        TopEdgeMarker(edge, effectiveEdge)
-
-        Column(Modifier.align(Alignment.TopCenter).fillMaxWidth()) {
             Spacer(Modifier.height(36.dp))
 
             Row(
@@ -91,43 +84,92 @@ fun CameraScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Tag("收工", onExit)
+                Tag("收工", effectiveEdge, onClick = onExit)
+                if (queueDepth > 0) {
+                    Text(
+                        "存盘 $queueDepth",
+                        color = Steel,
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.rotate(effectiveEdge.quarterTurns() * 90f)
+                    )
+                }
             }
 
             if (steps.isNotEmpty()) {
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(10.dp))
                 StepLadder(steps, currentIndex, shotCounts, onStepSelect)
             }
 
+            Spacer(Modifier.height(10.dp))
+
+            // 取景框 == 成片范围。3:4 是 ImageCapture 那边锁死的比例，
+            // 这样水印画在框里就是所见即所得，也不会被下面的控制条盖住。
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(3f / 4f)
+                    .background(Color.Black)
+            ) {
+                AndroidView(
+                    factory = { ctx ->
+                        PreviewView(ctx).apply {
+                            implementationMode = PreviewView.ImplementationMode.PERFORMANCE
+                            scaleType = PreviewView.ScaleType.FILL_CENTER
+                            bindPreview(this)
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+                WatermarkPreview(watermarkHeadline, watermarkLines, anchor, effectiveEdge)
+                TopEdgeMarker(edge, effectiveEdge)
+            }
+
             lastSaved?.let {
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(8.dp))
                 Text(
                     "已存 $it",
                     color = Steel,
                     fontSize = 11.sp,
                     fontFamily = FontFamily.Monospace,
-                    modifier = Modifier
-                        .padding(start = 16.dp)
-                        .background(Panel.copy(alpha = 0.9f), RoundedCornerShape(4.dp))
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 16.dp)
                 )
             }
+
+            Spacer(Modifier.weight(1f))
+
+            ControlBar(
+                anchor = anchor,
+                edge = edge,
+                effectiveEdge = effectiveEdge,
+                onOrientationTap = {
+                    onPanelChange(if (panel == Panel.ORIENTATION) Panel.NONE else Panel.ORIENTATION)
+                },
+                onAnchorTap = {
+                    onPanelChange(if (panel == Panel.ANCHOR) Panel.NONE else Panel.ANCHOR)
+                },
+                onShutter = onShutter
+            )
         }
 
-        if (dialOpen) DialScrim(onDialToggle)
-
-        ControlBar(
-            anchor = anchor,
-            edge = edge,
-            effectiveEdge = effectiveEdge,
-            dialOpen = dialOpen,
-            queueDepth = queueDepth,
-            onAnchorToggle = onAnchorToggle,
-            onDialToggle = onDialToggle,
-            onEdgePick = onEdgePick,
-            onShutter = onShutter,
-            modifier = Modifier.align(Alignment.BottomCenter)
-        )
+        if (panel != Panel.NONE) {
+            DialScrim { onPanelChange(Panel.NONE) }
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                when (panel) {
+                    Panel.ORIENTATION -> OrientationDialPanel(edge) {
+                        onEdgePick(it)
+                        onPanelChange(Panel.NONE)
+                    }
+                    Panel.ANCHOR -> AnchorGridPanel(anchor, effectiveEdge) {
+                        onAnchorPick(it)
+                        onPanelChange(Panel.NONE)
+                    }
+                    Panel.NONE -> Unit
+                }
+            }
+        }
     }
 }
 
@@ -160,37 +202,30 @@ private fun StepLadder(
             }
             Column(
                 Modifier
-                    .width(if (active) 210.dp else 120.dp)
-                    .height(68.dp)
+                    .width(if (active) 200.dp else 116.dp)
+                    .height(62.dp)
                     .clip(RoundedCornerShape(6.dp))
-                    .background(Panel.copy(alpha = 0.92f))
+                    .background(Panel)
                     .border(if (active) 2.dp else 1.dp, tint, RoundedCornerShape(6.dp))
                     .clickable { onSelect(i) }
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(
                         step.order.toString().padStart(2, '0'),
-                        color = tint,
-                        fontSize = 12.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold
+                        color = tint, fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold
                     )
                     Text(
                         "$taken/${step.shots}",
-                        color = tint,
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace
+                        color = tint, fontSize = 10.sp, fontFamily = FontFamily.Monospace
                     )
                 }
                 Text(
                     step.label(),
                     color = if (active) Color.White else Steel,
-                    fontSize = if (active) 15.sp else 12.sp,
+                    fontSize = if (active) 14.sp else 11.sp,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -204,58 +239,31 @@ private fun ControlBar(
     anchor: Anchor,
     edge: TopEdge,
     effectiveEdge: TopEdge,
-    dialOpen: Boolean,
-    queueDepth: Int,
-    onAnchorToggle: () -> Unit,
-    onDialToggle: () -> Unit,
-    onEdgePick: (TopEdge) -> Unit,
+    onOrientationTap: () -> Unit,
+    onAnchorTap: () -> Unit,
     onShutter: () -> Unit,
-    modifier: Modifier = Modifier,
 ) {
     Column(
-        modifier
+        Modifier
             .fillMaxWidth()
-            .background(Panel.copy(alpha = 0.94f))
-            .padding(vertical = 16.dp)
+            .background(Panel)
+            .padding(vertical = 14.dp)
     ) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 24.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            OrientationDial(
-                edge = edge,
-                effective = effectiveEdge,
-                expanded = dialOpen,
-                onToggle = onDialToggle,
-                onPick = onEdgePick
-            )
-            if (queueDepth > 0) {
-                Text(
-                    "存盘 $queueDepth",
-                    color = Steel,
-                    fontSize = 12.sp,
-                    fontFamily = FontFamily.Monospace
-                )
-            }
-            Tag(
-                when (anchor) {
-                    Anchor.BOTTOM_LEFT -> "水印 左下"
-                    Anchor.BOTTOM_RIGHT -> "水印 右下"
-                    Anchor.TOP_RIGHT -> "水印 右上"
-                    Anchor.TOP_LEFT -> "水印 左上"
-                },
-                onAnchorToggle,
-                highlighted = true
-            )
+            OrientationDial(edge, effectiveEdge, onOrientationTap)
+            AnchorButton(anchor, effectiveEdge, onAnchorTap)
         }
 
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(16.dp))
 
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
             Box(
                 Modifier
-                    .size(78.dp)
+                    .size(74.dp)
                     .clip(CircleShape)
                     .background(Color.White)
                     .clickable(onClick = onShutter)
@@ -265,19 +273,25 @@ private fun ControlBar(
 }
 
 @Composable
-private fun Tag(label: String, onClick: () -> Unit, highlighted: Boolean = false) {
+private fun Tag(
+    label: String,
+    edge: TopEdge,
+    highlighted: Boolean = false,
+    onClick: () -> Unit,
+) {
     val tint = if (highlighted) Amber else Steel
-    Text(
-        label,
-        color = tint,
-        fontSize = 13.sp,
-        fontWeight = FontWeight.Medium,
-        modifier = Modifier
+    Box(
+        Modifier
             .clip(RoundedCornerShape(4.dp))
             .border(1.dp, tint, RoundedCornerShape(4.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 12.dp)
-    )
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+    ) {
+        Text(
+            label, color = tint, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+            modifier = Modifier.rotate(edge.quarterTurns() * 90f)
+        )
+    }
 }
 
 @Composable
@@ -286,7 +300,7 @@ fun PermissionGate(onRequest: () -> Unit) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text("需要相机权限才能拍摄留档", color = Color.White, fontSize = 16.sp)
             Spacer(Modifier.height(20.dp))
-            Tag("授予权限", onRequest, highlighted = true)
+            Tag("授予权限", TopEdge.TOP, highlighted = true, onClick = onRequest)
         }
     }
 }

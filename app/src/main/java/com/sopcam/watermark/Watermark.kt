@@ -34,15 +34,17 @@ enum class Anchor { TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT }
 enum class TopEdge(val surfaceRotation: Int) {
     AUTO(-1),
     TOP(Surface.ROTATION_0),
-    LEFT(Surface.ROTATION_90),
+    // 实测校准：ROTATION_90 对应的是「成片上方朝右」，不是朝左。
+    // targetRotation 描述的是设备转了多少，跟成片顶部指向刚好相反。
+    LEFT(Surface.ROTATION_270),
     BOTTOM(Surface.ROTATION_180),
-    RIGHT(Surface.ROTATION_270);
+    RIGHT(Surface.ROTATION_90);
 
     companion object {
         fun of(surfaceRotation: Int): TopEdge = when (surfaceRotation) {
-            Surface.ROTATION_90 -> LEFT
+            Surface.ROTATION_90 -> RIGHT
             Surface.ROTATION_180 -> BOTTOM
-            Surface.ROTATION_270 -> RIGHT
+            Surface.ROTATION_270 -> LEFT
             else -> TOP
         }
     }

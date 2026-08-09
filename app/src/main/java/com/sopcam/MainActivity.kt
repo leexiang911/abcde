@@ -26,6 +26,7 @@ import com.sopcam.sop.SopStep
 import com.sopcam.sop.SopStore
 import com.sopcam.sop.SopTemplate
 import com.sopcam.ui.CameraScreen
+import com.sopcam.ui.Panel
 import com.sopcam.ui.PermissionGate
 import com.sopcam.ui.SetupScreen
 import com.sopcam.ui.TemplateEditScreen
@@ -61,7 +62,7 @@ class MainActivity : ComponentActivity() {
     private var anchor by mutableStateOf(Anchor.BOTTOM_LEFT)
     private var topEdge by mutableStateOf(TopEdge.AUTO)
     private var effectiveEdge by mutableStateOf(TopEdge.TOP)
-    private var dialOpen by mutableStateOf(false)
+    private var panel by mutableStateOf(Panel.NONE)
     private var queueDepth by mutableIntStateOf(0)
     private var lastSaved by mutableStateOf<String?>(null)
 
@@ -167,18 +168,17 @@ class MainActivity : ComponentActivity() {
                     anchor = anchor,
                     edge = topEdge,
                     effectiveEdge = effectiveEdge,
-                    dialOpen = dialOpen,
+                    panel = panel,
                     watermarkHeadline = watermarkHeadline(),
                     watermarkLines = watermarkLines(System.currentTimeMillis()),
                     queueDepth = queueDepth,
                     lastSaved = lastSaved,
                     onStepSelect = { stepIndex = it },
-                    onAnchorToggle = { anchor = anchor.next() },
-                    onDialToggle = { dialOpen = !dialOpen },
+                    onPanelChange = { panel = it },
+                    onAnchorPick = { anchor = it },
                     onEdgePick = {
                         topEdge = it
                         orientation.topEdge = it
-                        dialOpen = false
                     },
                     onShutter = ::capture,
                     onExit = {
@@ -263,11 +263,4 @@ class MainActivity : ComponentActivity() {
         pipeline.shutdown()
         super.onDestroy()
     }
-}
-
-private fun Anchor.next(): Anchor = when (this) {
-    Anchor.BOTTOM_LEFT -> Anchor.BOTTOM_RIGHT
-    Anchor.BOTTOM_RIGHT -> Anchor.TOP_RIGHT
-    Anchor.TOP_RIGHT -> Anchor.TOP_LEFT
-    Anchor.TOP_LEFT -> Anchor.BOTTOM_LEFT
 }
