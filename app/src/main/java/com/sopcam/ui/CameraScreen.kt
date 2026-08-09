@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -58,6 +59,7 @@ fun CameraScreen(
     currentIndex: Int,
     shotCounts: Map<Int, Int>,
     anchor: Anchor,
+    watermarkVisible: Boolean,
     edge: TopEdge,
     effectiveEdge: TopEdge,
     panel: OverlayPanel,
@@ -68,6 +70,7 @@ fun CameraScreen(
     onStepSelect: (Int) -> Unit,
     onPanelChange: (OverlayPanel) -> Unit,
     onAnchorPick: (Anchor) -> Unit,
+    onWatermarkDisable: () -> Unit,
     onEdgePick: (TopEdge) -> Unit,
     onShutter: () -> Unit,
     onExit: () -> Unit,
@@ -109,6 +112,7 @@ fun CameraScreen(
                 Modifier
                     .fillMaxWidth()
                     .aspectRatio(3f / 4f)
+                    .clip(RectangleShape)
                     .background(Color.Black)
             ) {
                 AndroidView(
@@ -121,7 +125,9 @@ fun CameraScreen(
                     },
                     modifier = Modifier.fillMaxSize()
                 )
-                WatermarkPreview(watermarkHeadline, watermarkLines, anchor, effectiveEdge)
+                if (watermarkVisible) {
+                    WatermarkPreview(watermarkHeadline, watermarkLines, anchor, effectiveEdge)
+                }
                 TopEdgeMarker(edge, effectiveEdge)
             }
 
@@ -142,6 +148,7 @@ fun CameraScreen(
 
             ControlBar(
                 anchor = anchor,
+                watermarkVisible = watermarkVisible,
                 edge = edge,
                 effectiveEdge = effectiveEdge,
                 onOrientationTap = {
@@ -162,10 +169,19 @@ fun CameraScreen(
                         onEdgePick(it)
                         onPanelChange(OverlayPanel.NONE)
                     }
-                    OverlayPanel.ANCHOR -> AnchorGridPanel(anchor, effectiveEdge) {
-                        onAnchorPick(it)
-                        onPanelChange(OverlayPanel.NONE)
-                    }
+                    OverlayPanel.ANCHOR -> AnchorGridPanel(
+                        anchor = anchor,
+                        edge = effectiveEdge,
+                        visible = watermarkVisible,
+                        onPick = {
+                            onAnchorPick(it)
+                            onPanelChange(OverlayPanel.NONE)
+                        },
+                        onDisable = {
+                            onWatermarkDisable()
+                            onPanelChange(OverlayPanel.NONE)
+                        }
+                    )
                     OverlayPanel.NONE -> Unit
                 }
             }
@@ -237,6 +253,7 @@ private fun StepLadder(
 @Composable
 private fun ControlBar(
     anchor: Anchor,
+    watermarkVisible: Boolean,
     edge: TopEdge,
     effectiveEdge: TopEdge,
     onOrientationTap: () -> Unit,
@@ -255,7 +272,7 @@ private fun ControlBar(
             verticalAlignment = Alignment.CenterVertically
         ) {
             OrientationDial(edge, effectiveEdge, onOrientationTap)
-            AnchorButton(anchor, effectiveEdge, onAnchorTap)
+            AnchorButton(anchor, effectiveEdge, watermarkVisible, onAnchorTap)
         }
 
         Spacer(Modifier.height(16.dp))

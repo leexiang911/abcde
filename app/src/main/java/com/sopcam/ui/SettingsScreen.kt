@@ -64,13 +64,32 @@ fun SettingsScreen(
         SectionTitle("水印")
 
         SwitchRow(
-            title = "在照片上显示 SOP",
-            desc = if (settings.showSopOnPhoto)
-                "照片上烧录可见水印，信息同时写进 EXIF 和 XMP"
-            else
-                "画面保持干净，信息只写进 EXIF 和 XMP",
-            checked = settings.showSopOnPhoto,
-        ) { onChange(settings.copy(showSopOnPhoto = it)) }
+            title = "时间水印",
+            desc = "照片上显示拍摄时间，精确到分钟",
+            checked = settings.showTimeStamp,
+        ) { onChange(settings.copy(showTimeStamp = it)) }
+
+        Spacer(Modifier.height(10.dp))
+
+        SwitchRow(
+            title = "SOP 步骤水印",
+            desc = "照片上显示当前拍摄点位的序号和名称",
+            checked = settings.showSopStep,
+        ) { onChange(settings.copy(showSopStep = it)) }
+
+        Spacer(Modifier.height(10.dp))
+        Text(
+            "工单号、序列号、控制器型号和平台不会画在照片上——那些是给机器读的，" +
+                "盖在板子上只会挡视线。它们只写进元数据。" +
+                "水印总开关在相机界面的田字格里，随手就能关。",
+            color = Steel,
+            fontSize = 12.sp,
+            lineHeight = 19.sp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Panel, RoundedCornerShape(8.dp))
+                .padding(14.dp)
+        )
 
         Spacer(Modifier.height(28.dp))
         SectionTitle("存储")
@@ -92,8 +111,9 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(20.dp))
         Text(
-            "每张照片都会写入：唯一 ID、拍摄时间、手机型号和系统版本、工单号、序列号、" +
-                "控制器型号、平台、SOP 步骤序号和名称。电脑端用 exiftool 可以批量导出成表格。",
+            "无论水印开不开，每张照片都会写入：唯一 ID、拍摄时间、手机型号和系统版本、" +
+                "工单号、序列号、控制器型号、平台、SOP 步骤序号和名称。" +
+                "所以以后想重新排版水印，照着元数据批量重烧就行。",
             color = Steel,
             fontSize = 13.sp,
             lineHeight = 20.sp,

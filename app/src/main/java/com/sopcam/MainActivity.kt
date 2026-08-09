@@ -244,17 +244,28 @@ class MainActivity : ComponentActivity() {
                     currentIndex = stepIndex,
                     shotCounts = shotCounts,
                     anchor = anchor,
+                    watermarkVisible = settings.watermarkVisible,
                     edge = topEdge,
                     effectiveEdge = effectiveEdge,
                     panel = panel,
-                    watermarkHeadline = if (settings.showSopOnPhoto) watermarkHeadline() else null,
-                    watermarkLines = if (settings.showSopOnPhoto)
-                        watermarkLines(System.currentTimeMillis()) else emptyList(),
+                    watermarkHeadline = watermarkHeadline(),
+                    watermarkLines = watermarkLines(System.currentTimeMillis()),
                     queueDepth = queueDepth,
                     lastSaved = lastSaved,
                     onStepSelect = { stepIndex = it },
                     onPanelChange = { panel = it },
-                    onAnchorPick = { anchor = it },
+                    onAnchorPick = {
+                        anchor = it
+                        // 选了角就等于把水印打开，不用先去开总开关
+                        if (!settings.watermarkVisible) {
+                            settings = settings.copy(watermarkVisible = true)
+                            SettingsStore.save(this, settings)
+                        }
+                    },
+                    onWatermarkDisable = {
+                        settings = settings.copy(watermarkVisible = !settings.watermarkVisible)
+                        SettingsStore.save(this, settings)
+                    },
                     onEdgePick = {
                         topEdge = it
                         orientation.topEdge = it
@@ -279,24 +290,17 @@ class MainActivity : ComponentActivity() {
         permissionLauncher.launch(wanted.toTypedArray())
     }
 
-    /** 预览层和烧录层共用，保证所见即所得 */
-    private fun watermarkHeadline(): String? = currentStep?.let {
-        "${it.order.toString().padStart(2, '0')} · ${it.label()}"
-    }
+    /**
+     * 预览层和烧录层共用，保证所见即所得。
+     * 画面上只留时间和当前步骤 —— 工单号、序列号、型号平台是给机器读的，
+     * 盖在板子上只挡视线，它们全部只进元数据。
+     */
+    private fun watermarkHeadline(): String? =
+        if (!settings.showSopStep) null
+        else currentStep?.let { "${it.order.toString().padStart(2, '0')} · ${it.label()}" }
 
-    private fun watermarkLines(at: Long): List<String> = buildList {
-        add(stampFmt.format(Date(at)))
-        val cls = listOfNotNull(
-            activeModel?.name,
-            platformOption?.let { p -> p.label + (if (p.sub.isNotBlank()) "(${p.sub})" else "") }
-        ).joinToString(" · ")
-        if (cls.isNotBlank()) add(cls)
-        val id = listOfNotNull(
-            workOrder.takeIf { it.isNotBlank() }?.let { "工单 $it" },
-            serialNo.takeIf { it.isNotBlank() }?.let { "SN $it" }
-        ).joinToString("  ")
-        if (id.isNotBlank()) add(id)
-    }
+    private fun watermarkLines(at: Long): List<String> =
+        if (settings.showTimeStamp) listOf(stampFmt.format(Date(at))) else emptyList()
 
     /**
      * 室内基本拿不到定位，所以只取最后一次已知位置，不主动请求更新——
@@ -356,7 +360,7 @@ class MainActivity : ComponentActivity() {
             topEdge = (if (topEdge == TopEdge.AUTO) effectiveEdge else topEdge).name,
             latitude = gps?.first,
             longitude = gps?.second,
-            hasWatermark = settings.showSopOnPhoto,
+            hasWatermark = settings.burnsAnything,
         )
 
         queueDepth += 1
@@ -368,7 +372,7 @@ class MainActivity : ComponentActivity() {
                 content = WatermarkContent(watermarkHeadline(), watermarkLines(now)),
                 anchor = anchor,
                 meta = meta,
-                burnWatermark = settings.showSopOnPhoto,
+                burnWatermark = settings.burnsAnything,
                 keepOriginal = settings.keepOriginal,
             )
         }

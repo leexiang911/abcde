@@ -99,24 +99,40 @@ object Catalog {
  * ------------------------------------------------------------------ */
 
 data class AppSettings(
-    /** 开：照片上烧可见水印，同时写元数据。关：只写元数据，画面干净。 */
-    val showSopOnPhoto: Boolean = true,
+    /** 可见水印总开关。相机界面田字格里的 🚫 直接切它，不用进设置。 */
+    val watermarkVisible: Boolean = true,
+    /** 水印里的时间那一行 */
+    val showTimeStamp: Boolean = true,
+    /** 水印里的 SOP 步骤那一行 */
+    val showSopStep: Boolean = true,
     /** 额外存一份无水印原图到 RAW 子目录，方便以后重烧水印 */
     val keepOriginal: Boolean = true,
     /** 车间多在室内，GPS 常年拿不到定位，默认关 */
     val recordGps: Boolean = false,
 ) {
+    /** 两行都关等于没水印，那就别白跑一趟烧录 */
+    val burnsAnything: Boolean
+        get() = watermarkVisible && (showTimeStamp || showSopStep)
+
     fun toJson(): JSONObject = JSONObject()
-        .put("showSopOnPhoto", showSopOnPhoto)
+        .put("watermarkVisible", watermarkVisible)
+        .put("showTimeStamp", showTimeStamp)
+        .put("showSopStep", showSopStep)
         .put("keepOriginal", keepOriginal)
         .put("recordGps", recordGps)
 
     companion object {
-        fun from(o: JSONObject) = AppSettings(
-            showSopOnPhoto = o.optBoolean("showSopOnPhoto", true),
-            keepOriginal = o.optBoolean("keepOriginal", true),
-            recordGps = o.optBoolean("recordGps", false),
-        )
+        fun from(o: JSONObject): AppSettings {
+            // 旧版只有一个 showSopOnPhoto，用它给新的总开关兜底，升级后设置不丢
+            val legacy = o.optBoolean("showSopOnPhoto", true)
+            return AppSettings(
+                watermarkVisible = o.optBoolean("watermarkVisible", legacy),
+                showTimeStamp = o.optBoolean("showTimeStamp", true),
+                showSopStep = o.optBoolean("showSopStep", true),
+                keepOriginal = o.optBoolean("keepOriginal", true),
+                recordGps = o.optBoolean("recordGps", false),
+            )
+        }
     }
 }
 

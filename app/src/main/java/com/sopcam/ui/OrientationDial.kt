@@ -1,5 +1,6 @@
 package com.sopcam.ui
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -22,9 +23,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sopcam.watermark.Anchor
@@ -184,15 +190,17 @@ private val anchorGrid = listOf(
 )
 
 @Composable
-fun AnchorButton(anchor: Anchor, edge: TopEdge, onToggle: () -> Unit) {
+fun AnchorButton(anchor: Anchor, edge: TopEdge, visible: Boolean, onToggle: () -> Unit) {
+    val tint = if (visible) Amber else Steel
     Box(
         Modifier
             .clip(RoundedCornerShape(4.dp))
-            .border(1.dp, Amber, RoundedCornerShape(4.dp))
+            .border(1.dp, tint, RoundedCornerShape(4.dp))
             .clickable(onClick = onToggle)
-            .padding(horizontal = 12.dp, vertical = 10.dp)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        contentAlignment = Alignment.Center
     ) {
-        MiniGrid(anchor, edge)
+        if (visible) MiniGrid(anchor, edge) else BlockedBadge(28.dp, 13.sp, Steel)
     }
 }
 
@@ -218,32 +226,96 @@ private fun MiniGrid(anchor: Anchor, edge: TopEdge) {
     }
 }
 
+/**
+ * 禁止符：圆圈 + 斜杠，中间一个 A。
+ * 用 Canvas 画而不是找图标库，省一个依赖，也好控制粗细跟边框对齐。
+ */
 @Composable
-fun AnchorGridPanel(anchor: Anchor, edge: TopEdge, onPick: (Anchor) -> Unit) {
+private fun BlockedBadge(size: Dp, letter: TextUnit, tint: Color) {
+    Box(Modifier.size(size), contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
+            val stroke = this.size.minDimension * 0.09f
+            val r = (this.size.minDimension - stroke) / 2f
+            val c = Offset(this.size.width / 2f, this.size.height / 2f)
+            drawCircle(tint, radius = r, center = c, style = Stroke(width = stroke))
+            val d = r * 0.707f
+            drawLine(
+                tint,
+                start = Offset(c.x - d, c.y + d),
+                end = Offset(c.x + d, c.y - d),
+                strokeWidth = stroke,
+                cap = StrokeCap.Round
+            )
+        }
+        Text("A", color = tint, fontSize = letter, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+fun AnchorGridPanel(
+    anchor: Anchor,
+    edge: TopEdge,
+    visible: Boolean,
+    onPick: (Anchor) -> Unit,
+    onDisable: () -> Unit,
+) {
     Column(
         Modifier
             .clip(RoundedCornerShape(10.dp))
             .background(Color(0xF2161A1F))
-            .padding(14.dp),
+            .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text("水印位置", color = Steel, fontSize = 12.sp)
-        Spacer(Modifier.height(10.dp))
+        Text(
+            if (visible) "水印位置" else "水印已关闭",
+            color = if (visible) Steel else Amber,
+            fontSize = 12.sp
+        )
+        Spacer(Modifier.height(12.dp))
+
+        // 关掉时四个角一起变暗——一眼能看出"现在谁也没选中"，
+        // 但仍然可点，点任意一格就等于重新打开并选中那个角。
         Column(Modifier.rotate(edge.quarterTurns() * 90f)) {
             anchorGrid.forEach { row ->
                 Row {
                     row.forEach { a ->
+                        val on = visible && a == anchor
                         Box(
                             Modifier
                                 .padding(3.dp)
                                 .size(58.dp)
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(if (a == anchor) Amber else Color(0xF22A3037))
+                                .background(
+                                    when {
+                                        on -> Amber
+                                        visible -> Color(0xF22A3037)
+                                        else -> Color(0x552A3037)
+                                    }
+                                )
                                 .clickable { onPick(a) }
                         )
                     }
                 }
             }
+        }
+
+        Spacer(Modifier.height(14.dp))
+        Row(
+            Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .background(if (visible) Color(0xF22A3037) else Amber)
+                .clickable(onClick = onDisable)
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            BlockedBadge(22.dp, 11.sp, if (visible) Steel else Ink)
+            Spacer(Modifier.width(10.dp))
+            Text(
+                "不加水印",
+                color = if (visible) Steel else Ink,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium
+            )
         }
     }
 }
