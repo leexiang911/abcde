@@ -245,3 +245,21 @@ object WatermarkRenderer {
         return src
     }
 }
+
+/**
+ * 成片相对于预览画面的旋转角度。
+ *
+ * Activity 已锁竖屏，屏幕方向恒为 ROTATION_0，所以只需看 targetRotation。
+ * calibrationQuarter 是现场校准量（0..3，每档 90°）：四种旋转组合的实际方向
+ * 依设备而异，写死容易反向——取景器上标错角比不标更误导人，所以留一个
+ * 校准按钮，拍一张对照后定死即可。
+ */
+fun overlayRotationDegrees(targetRotation: Int, calibrationQuarter: Int = 0): Float {
+    val q = when (targetRotation) {
+        Surface.ROTATION_90 -> 3
+        Surface.ROTATION_180 -> 2
+        Surface.ROTATION_270 -> 1
+        else -> 0
+    }
+    return ((((q + calibrationQuarter) % 4) + 4) % 4) * 90f
+}

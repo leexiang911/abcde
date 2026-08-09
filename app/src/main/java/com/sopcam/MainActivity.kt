@@ -3,6 +3,7 @@ package com.sopcam
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.view.Surface
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -11,6 +12,7 @@ import androidx.camera.core.Preview
 import androidx.camera.view.PreviewView
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
@@ -18,8 +20,15 @@ import androidx.lifecycle.lifecycleScope
 import com.sopcam.capture.CameraBinder
 import com.sopcam.capture.CapturePipeline
 import com.sopcam.capture.shoot
+import com.sopcam.sop.FileNaming
+import com.sopcam.sop.Session
+import com.sopcam.sop.SopStep
+import com.sopcam.sop.SopStore
+import com.sopcam.sop.SopTemplate
 import com.sopcam.ui.CameraScreen
 import com.sopcam.ui.PermissionGate
+import com.sopcam.ui.SetupScreen
+import com.sopcam.ui.TemplateEditScreen
 import com.sopcam.watermark.Anchor
 import com.sopcam.watermark.OrientationController
 import com.sopcam.watermark.OrientationLock
@@ -31,13 +40,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/**
- * 阶段一：相机 + 方向锁 + 水印烧录。
- *
- * 验收方法：锁横屏拍一张、锁竖屏拍一张，插线传到电脑，
- * 用 Windows 照片打开——水印必须在同一个角，且文字水平可读。
- * 这条过了，SOP 和语音才有意义往上叠。
- */
+private enum class Screen { SETUP, TEMPLATE_EDIT, CAMERA }
+
 class MainActivity : ComponentActivity() {
 
     private lateinit var pipeline: CapturePipeline
@@ -45,14 +49,27 @@ class MainActivity : ComponentActivity() {
     private lateinit var orientation: OrientationController
 
     private var hasPermission by mutableStateOf(false)
+    private var screen by mutableStateOf(Screen.SETUP)
+
+    private val templates = mutableStateListOf<SopTemplate>()
+    private var workOrder by mutableStateOf("")
+    private var serialNo by mutableStateOf("")
+    private var templateId by mutableStateOf("")
+    private var stepIndex by mutableIntStateOf(0)
+    private var shotCounts by mutableStateOf<Map<Int, Int>>(emptyMap())
+
     private var anchor by mutableStateOf(Anchor.BOTTOM_LEFT)
     private var lock by mutableStateOf(OrientationLock.AUTO)
     private var queueDepth by mutableIntStateOf(0)
     private var lastSaved by mutableStateOf<String?>(null)
 
-    /** 阶段二会换成工单号；现在先用日期分文件夹 */
-    private val dayFmt = SimpleDateFormat("yyyyMMdd", Locale.US)
-    private val nameFmt = SimpleDateFormat("HHmmss", Locale.US)
+    private val stampFmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA)
+
+    private val activeSteps: List<SopStep>
+        get() = templates.firstOrNull { it.id == templateId }?.steps ?: emptyList()
+
+    private val currentStep: SopStep?
+        get() = activeSteps.getOrNull(stepIndex)
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -65,6 +82,15 @@ class MainActivity : ComponentActivity() {
         hasPermission = ContextCompat.checkSelfPermission(
             this, Manifest.permission.CAMERA
         ) == PackageManager.PERMISSION_GRANTED
+
+        templates.addAll(SopStore.loadTemplates(this))
+        SopStore.loadSession(this).let { s ->
+            workOrder = s.workOrder
+            serialNo = s.serialNo
+            templateId = s.templateId
+            stepIndex = s.stepIndex
+            shotCounts = s.shotCounts
+        }
 
         pipeline = CapturePipeline(
             context = this,
@@ -82,38 +108,88 @@ class MainActivity : ComponentActivity() {
             }
         )
 
-        imageCapture = CameraBinder.buildImageCapture(android.view.Surface.ROTATION_0)
-
-        orientation = OrientationController(this) { rotation ->
-            imageCapture.targetRotation = rotation
-        }
+        imageCapture = CameraBinder.buildImageCapture(Surface.ROTATION_0)
+        orientation = OrientationController(this) { rot -> imageCapture.targetRotation = rot }
 
         setContent {
             if (!hasPermission) {
-                PermissionGate {
-                    permissionLauncher.launch(Manifest.permission.CAMERA)
-                }
-            } else {
-                CameraScreen(
+                PermissionGate { permissionLauncher.launch(Manifest.permission.CAMERA) }
+                return@setContent
+            }
+            when (screen) {
+                Screen.SETUP -> SetupScreen(
+                    workOrder = workOrder,
+                    serialNo = serialNo,
+                    templates = templates,
+                    activeTemplateId = templateId,
+                    onWorkOrderChange = { workOrder = it },
+                    onSerialChange = { serialNo = it },
+                    onTemplatePick = { id ->
+                        if (templateId != id) {
+                            templateId = id
+                            stepIndex = 0
+                            shotCounts = emptyMap()
+                        }
+                    },
+                    onNewTemplate = { screen = Screen.TEMPLATE_EDIT },
+                    onDeleteTemplate = { id ->
+                        templates.removeAll { it.id == id }
+                        if (templateId == id) templateId = ""
+                        SopStore.saveTemplates(this, templates.toList())
+                    },
+                    onStart = {
+                        persist()
+                        screen = Screen.CAMERA
+                    }
+                )
+
+                Screen.TEMPLATE_EDIT -> TemplateEditScreen(
+                    onSave = { t ->
+                        templates.add(t)
+                        SopStore.saveTemplates(this, templates.toList())
+                        templateId = t.id
+                        stepIndex = 0
+                        shotCounts = emptyMap()
+                        screen = Screen.SETUP
+                    },
+                    onCancel = { screen = Screen.SETUP }
+                )
+
+                Screen.CAMERA -> CameraScreen(
+                    steps = activeSteps,
+                    currentIndex = stepIndex,
+                    shotCounts = shotCounts,
                     anchor = anchor,
                     lock = lock,
                     queueDepth = queueDepth,
                     lastSaved = lastSaved,
+                    onStepSelect = { stepIndex = it },
                     onAnchorToggle = { anchor = anchor.next() },
                     onLockToggle = {
                         lock = lock.next()
                         orientation.lock = lock
                     },
                     onShutter = ::capture,
+                    onExit = {
+                        persist()
+                        screen = Screen.SETUP
+                    },
                     bindPreview = ::bindPreview
                 )
             }
         }
     }
 
+    private fun persist() {
+        SopStore.saveSession(
+            this,
+            Session(workOrder, serialNo, templateId, stepIndex, shotCounts)
+        )
+    }
+
     private fun bindPreview(view: PreviewView) {
         val preview = Preview.Builder().build().apply {
-            surfaceProvider = view.surfaceProvider
+            setSurfaceProvider(view.surfaceProvider)
         }
         lifecycleScope.launch {
             runCatching {
@@ -126,20 +202,37 @@ class MainActivity : ComponentActivity() {
 
     private fun capture() {
         val now = System.currentTimeMillis()
+        val step = currentStep
+        val taken = step?.let { shotCounts[it.order] ?: 0 } ?: 0
+
         queueDepth += 1
         imageCapture.shoot(
             pipeline = pipeline,
-            fileName = "SOP_${nameFmt.format(Date(now))}",
-            relativePath = "DCIM/SopCam/${dayFmt.format(Date(now))}",
+            fileName = FileNaming.build(step, taken + 1, now),
+            relativePath = FileNaming.relativePath(workOrder, serialNo, now),
             content = WatermarkContent(
-                headline = "待接入 SOP 步骤",
-                lines = listOf(
-                    SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA).format(Date(now)),
-                    "工单 —— · 序列号 ——"
-                )
+                headline = step?.let {
+                    "${it.order.toString().padStart(2, '0')} · ${it.label()}"
+                },
+                lines = buildList {
+                    add(stampFmt.format(Date(now)))
+                    val id = listOfNotNull(
+                        workOrder.takeIf { it.isNotBlank() }?.let { "工单 $it" },
+                        serialNo.takeIf { it.isNotBlank() }?.let { "SN $it" }
+                    ).joinToString("  ")
+                    if (id.isNotBlank()) add(id)
+                }
             ),
             anchor = anchor
         )
+
+        if (step != null) {
+            val next = taken + 1
+            shotCounts = shotCounts + (step.order to next)
+            // 拍够了自动跳下一步，省一次点击
+            if (next >= step.shots && stepIndex < activeSteps.lastIndex) stepIndex += 1
+            persist()
+        }
     }
 
     override fun onStart() {
@@ -149,6 +242,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         orientation.disable()
+        persist()
         super.onStop()
     }
 

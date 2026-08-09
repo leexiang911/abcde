@@ -1,8 +1,6 @@
 pluginManagement {
     repositories {
-        // 国内网络把 aliyun 这两行放最前面，拉依赖会快很多
-        maven("https://maven.aliyun.com/repository/gradle-plugin")
-        maven("https://maven.aliyun.com/repository/public")
+        // CI 上直接走官方源；本地 Termux 编译若嫌慢，可自行加 aliyun 镜像
         google()
         mavenCentral()
         gradlePluginPortal()
@@ -12,8 +10,6 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
     repositories {
-        maven("https://maven.aliyun.com/repository/public")
-        maven("https://maven.aliyun.com/repository/google")
         google()
         mavenCentral()
     }

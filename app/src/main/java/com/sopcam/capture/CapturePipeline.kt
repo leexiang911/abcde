@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
 import android.provider.MediaStore
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
@@ -131,7 +132,7 @@ class CapturePipeline(
     }
 
     fun submit(shot: PendingShot) {
-        queue.trySend(shot).onFailure { onError(IllegalStateException("落盘队列已满，请稍等")) }
+        if (queue.trySend(shot).isFailure) onError(IllegalStateException("落盘队列已满，请稍等"))
     }
 
     fun shutdown() {
@@ -175,7 +176,7 @@ object CameraBinder {
         preview: Preview,
         imageCapture: ImageCapture,
         lensFacing: Int = CameraSelector.LENS_FACING_BACK,
-    ) {
+    ): Camera {
         val provider = suspendCoroutine<ProcessCameraProvider> { cont ->
             val future = ProcessCameraProvider.getInstance(context)
             future.addListener(
@@ -184,7 +185,7 @@ object CameraBinder {
             )
         }
         provider.unbindAll()
-        provider.bindToLifecycle(
+        return provider.bindToLifecycle(
             owner,
             CameraSelector.Builder().requireLensFacing(lensFacing).build(),
             UseCaseGroup.Builder().addUseCase(preview).addUseCase(imageCapture).build()
