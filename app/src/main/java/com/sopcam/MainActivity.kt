@@ -113,7 +113,7 @@ class MainActivity : ComponentActivity() {
 
     private fun bindPreview(view: PreviewView) {
         val preview = Preview.Builder().build().apply {
-            surfaceProvider = view.surfaceProvider
+            setSurfaceProvider(view.surfaceProvider)
         }
         lifecycleScope.launch {
             runCatching {

@@ -203,7 +203,6 @@ fun ImageCapture.shoot(
     onShutter: () -> Unit = {},
 ) {
     takePicture(pipeline.captureExecutor, object : ImageCapture.OnImageCapturedCallback() {
-        override fun onCaptureStarted() = onShutter()
 
         override fun onCaptureSuccess(image: ImageProxy) {
             val buf = image.planes[0].buffer
