@@ -1,7 +1,10 @@
 package com.sopcam
 
 import android.Manifest
+import android.annotation.SuppressLint
+import android.content.Context
 import android.content.pm.PackageManager
+import android.location.LocationManager
 import android.os.Bundle
 import android.view.Surface
 import androidx.activity.ComponentActivity
@@ -19,15 +22,24 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.sopcam.capture.CameraBinder
 import com.sopcam.capture.CapturePipeline
+import com.sopcam.capture.PendingShot
 import com.sopcam.capture.shoot
+import com.sopcam.meta.ImageMeta
+import com.sopcam.sop.AppSettings
+import com.sopcam.sop.Catalog
+import com.sopcam.sop.ControllerModel
 import com.sopcam.sop.FileNaming
 import com.sopcam.sop.Session
+import com.sopcam.sop.SettingsStore
 import com.sopcam.sop.SopStep
 import com.sopcam.sop.SopStore
 import com.sopcam.sop.SopTemplate
 import com.sopcam.ui.CameraScreen
 import com.sopcam.ui.OverlayPanel
 import com.sopcam.ui.PermissionGate
+import com.sopcam.ui.PickOption
+import com.sopcam.ui.PickerSheet
+import com.sopcam.ui.SettingsScreen
 import com.sopcam.ui.SetupScreen
 import com.sopcam.ui.TemplateEditScreen
 import com.sopcam.watermark.Anchor
@@ -40,8 +52,12 @@ import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 
-private enum class Screen { SETUP, TEMPLATE_EDIT, CAMERA }
+private enum class Screen { SETUP, TEMPLATE_EDIT, SETTINGS, CAMERA }
+
+/** 开工页上弹出的哪个选择器 */
+private enum class Sheet { NONE, MODEL, PLATFORM }
 
 class MainActivity : ComponentActivity() {
 
@@ -51,10 +67,16 @@ class MainActivity : ComponentActivity() {
 
     private var hasPermission by mutableStateOf(false)
     private var screen by mutableStateOf(Screen.SETUP)
+    private var sheet by mutableStateOf(Sheet.NONE)
 
     private val templates = mutableStateListOf<SopTemplate>()
+    private var catalog by mutableStateOf<List<ControllerModel>>(emptyList())
+    private var settings by mutableStateOf(AppSettings())
+
     private var workOrder by mutableStateOf("")
     private var serialNo by mutableStateOf("")
+    private var modelId by mutableStateOf("")
+    private var platformId by mutableStateOf("")
     private var templateId by mutableStateOf("")
     private var stepIndex by mutableIntStateOf(0)
     private var shotCounts by mutableStateOf<Map<Int, Int>>(emptyMap())
@@ -66,7 +88,18 @@ class MainActivity : ComponentActivity() {
     private var queueDepth by mutableIntStateOf(0)
     private var lastSaved by mutableStateOf<String?>(null)
 
-    private val stampFmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA)
+    /** 水印上的时间只到分钟 —— 秒对留档没意义，还占宽度 */
+    private val stampFmt = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.CHINA)
+
+    private val activeModel: ControllerModel?
+        get() = catalog.firstOrNull { it.id == modelId }
+
+    private val modelOption: PickOption?
+        get() = activeModel?.let { PickOption(it.id, it.name) }
+
+    private val platformOption: PickOption?
+        get() = activeModel?.platforms?.firstOrNull { it.id == platformId }
+            ?.let { PickOption(it.id, it.name, it.customer) }
 
     private val activeSteps: List<SopStep>
         get() = templates.firstOrNull { it.id == templateId }?.steps ?: emptyList()
@@ -75,8 +108,8 @@ class MainActivity : ComponentActivity() {
         get() = activeSteps.getOrNull(stepIndex)
 
     private val permissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            hasPermission = granted
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
+            hasPermission = granted[Manifest.permission.CAMERA] == true
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -87,6 +120,8 @@ class MainActivity : ComponentActivity() {
         ) == PackageManager.PERMISSION_GRANTED
 
         templates.addAll(SopStore.loadTemplates(this))
+        catalog = Catalog.load(this)
+        settings = SettingsStore.load(this)
         SopStore.loadSession(this).let { s ->
             workOrder = s.workOrder
             serialNo = s.serialNo
@@ -119,34 +154,77 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             if (!hasPermission) {
-                PermissionGate { permissionLauncher.launch(Manifest.permission.CAMERA) }
+                PermissionGate { requestPermissions() }
                 return@setContent
             }
             when (screen) {
-                Screen.SETUP -> SetupScreen(
-                    workOrder = workOrder,
-                    serialNo = serialNo,
-                    templates = templates,
-                    activeTemplateId = templateId,
-                    onWorkOrderChange = { workOrder = it },
-                    onSerialChange = { serialNo = it },
-                    onTemplatePick = { id ->
-                        if (templateId != id) {
-                            templateId = id
-                            stepIndex = 0
-                            shotCounts = emptyMap()
+                Screen.SETUP -> {
+                    SetupScreen(
+                        modelOption = modelOption,
+                        platformOption = platformOption,
+                        platformEnabled = activeModel != null,
+                        onModelTap = { sheet = Sheet.MODEL },
+                        onPlatformTap = { if (activeModel != null) sheet = Sheet.PLATFORM },
+                        onSettings = { screen = Screen.SETTINGS },
+                        workOrder = workOrder,
+                        serialNo = serialNo,
+                        templates = templates,
+                        activeTemplateId = templateId,
+                        onWorkOrderChange = { workOrder = it },
+                        onSerialChange = { serialNo = it },
+                        onTemplatePick = { id ->
+                            if (templateId != id) {
+                                templateId = id
+                                stepIndex = 0
+                                shotCounts = emptyMap()
+                            }
+                        },
+                        onNewTemplate = { screen = Screen.TEMPLATE_EDIT },
+                        onDeleteTemplate = { id ->
+                            templates.removeAll { it.id == id }
+                            if (templateId == id) templateId = ""
+                            SopStore.saveTemplates(this, templates.toList())
+                        },
+                        onStart = {
+                            persist()
+                            screen = Screen.CAMERA
                         }
-                    },
-                    onNewTemplate = { screen = Screen.TEMPLATE_EDIT },
-                    onDeleteTemplate = { id ->
-                        templates.removeAll { it.id == id }
-                        if (templateId == id) templateId = ""
-                        SopStore.saveTemplates(this, templates.toList())
-                    },
-                    onStart = {
-                        persist()
-                        screen = Screen.CAMERA
+                    )
+                    when (sheet) {
+                        Sheet.MODEL -> PickerSheet(
+                            title = "控制器型号",
+                            options = catalog.map { PickOption(it.id, it.name) },
+                            selectedId = modelId,
+                            onPick = { opt ->
+                                modelId = opt?.id ?: ""
+                                platformId = ""      // 换型号了，平台得重选
+                                sheet = Sheet.NONE
+                            },
+                            onDismiss = { sheet = Sheet.NONE }
+                        )
+                        Sheet.PLATFORM -> PickerSheet(
+                            title = "分类平台",
+                            options = activeModel?.platforms
+                                ?.map { PickOption(it.id, it.name, it.customer) } ?: emptyList(),
+                            selectedId = platformId,
+                            onPick = { opt ->
+                                platformId = opt?.id ?: ""
+                                sheet = Sheet.NONE
+                            },
+                            onDismiss = { sheet = Sheet.NONE }
+                        )
+                        Sheet.NONE -> Unit
                     }
+                }
+
+                Screen.SETTINGS -> SettingsScreen(
+                    settings = settings,
+                    onChange = {
+                        settings = it
+                        SettingsStore.save(this, it)
+                        if (it.recordGps) requestPermissions()
+                    },
+                    onBack = { screen = Screen.SETUP }
                 )
 
                 Screen.TEMPLATE_EDIT -> TemplateEditScreen(
@@ -169,8 +247,9 @@ class MainActivity : ComponentActivity() {
                     edge = topEdge,
                     effectiveEdge = effectiveEdge,
                     panel = panel,
-                    watermarkHeadline = watermarkHeadline(),
-                    watermarkLines = watermarkLines(System.currentTimeMillis()),
+                    watermarkHeadline = if (settings.showSopOnPhoto) watermarkHeadline() else null,
+                    watermarkLines = if (settings.showSopOnPhoto)
+                        watermarkLines(System.currentTimeMillis()) else emptyList(),
                     queueDepth = queueDepth,
                     lastSaved = lastSaved,
                     onStepSelect = { stepIndex = it },
@@ -191,6 +270,15 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun requestPermissions() {
+        val wanted = mutableListOf(Manifest.permission.CAMERA)
+        if (settings.recordGps) {
+            wanted += Manifest.permission.ACCESS_FINE_LOCATION
+            wanted += Manifest.permission.ACCESS_COARSE_LOCATION
+        }
+        permissionLauncher.launch(wanted.toTypedArray())
+    }
+
     /** 预览层和烧录层共用，保证所见即所得 */
     private fun watermarkHeadline(): String? = currentStep?.let {
         "${it.order.toString().padStart(2, '0')} · ${it.label()}"
@@ -198,11 +286,34 @@ class MainActivity : ComponentActivity() {
 
     private fun watermarkLines(at: Long): List<String> = buildList {
         add(stampFmt.format(Date(at)))
+        val cls = listOfNotNull(
+            activeModel?.name,
+            platformOption?.let { p -> p.label + (if (p.sub.isNotBlank()) "(${p.sub})" else "") }
+        ).joinToString(" · ")
+        if (cls.isNotBlank()) add(cls)
         val id = listOfNotNull(
             workOrder.takeIf { it.isNotBlank() }?.let { "工单 $it" },
             serialNo.takeIf { it.isNotBlank() }?.let { "SN $it" }
         ).joinToString("  ")
         if (id.isNotBlank()) add(id)
+    }
+
+    /**
+     * 室内基本拿不到定位，所以只取最后一次已知位置，不主动请求更新——
+     * 主动请求会一直吊着 GPS 耗电，而且大概率还是拿不到。
+     */
+    @SuppressLint("MissingPermission")
+    private fun lastKnownLocation(): Pair<Double, Double>? {
+        if (!settings.recordGps) return null
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION)
+            != PackageManager.PERMISSION_GRANTED
+        ) return null
+        return runCatching {
+            val lm = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            val loc = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
+                .firstNotNullOfOrNull { lm.getLastKnownLocation(it) }
+            loc?.let { it.latitude to it.longitude }
+        }.getOrNull()
     }
 
     private fun persist() {
@@ -229,20 +340,42 @@ class MainActivity : ComponentActivity() {
         val now = System.currentTimeMillis()
         val step = currentStep
         val taken = step?.let { shotCounts[it.order] ?: 0 } ?: 0
+        val gps = lastKnownLocation()
+
+        val meta = ImageMeta(
+            imageId = UUID.randomUUID().toString(),
+            capturedAt = now,
+            workOrder = workOrder,
+            serialNo = serialNo,
+            modelName = activeModel?.name ?: "",
+            platformName = platformOption?.label ?: "",
+            stepOrder = step?.order ?: 0,
+            stepName = step?.name ?: "",
+            stepRefDes = step?.refDes ?: "",
+            anchor = anchor.name,
+            topEdge = (if (topEdge == TopEdge.AUTO) effectiveEdge else topEdge).name,
+            latitude = gps?.first,
+            longitude = gps?.second,
+            hasWatermark = settings.showSopOnPhoto,
+        )
 
         queueDepth += 1
-        imageCapture.shoot(
-            pipeline = pipeline,
-            fileName = FileNaming.build(step, taken + 1, now),
-            relativePath = FileNaming.relativePath(workOrder, serialNo, now),
-            content = WatermarkContent(watermarkHeadline(), watermarkLines(now)),
-            anchor = anchor
-        )
+        imageCapture.shoot(pipeline) { bytes ->
+            PendingShot(
+                jpeg = bytes,
+                fileName = FileNaming.build(step, taken + 1, now),
+                relativePath = FileNaming.relativePath(workOrder, serialNo, now),
+                content = WatermarkContent(watermarkHeadline(), watermarkLines(now)),
+                anchor = anchor,
+                meta = meta,
+                burnWatermark = settings.showSopOnPhoto,
+                keepOriginal = settings.keepOriginal,
+            )
+        }
 
         if (step != null) {
             val next = taken + 1
             shotCounts = shotCounts + (step.order to next)
-            // 拍够了自动跳下一步，省一次点击
             if (next >= step.shots && stepIndex < activeSteps.lastIndex) stepIndex += 1
             persist()
         }
@@ -264,3 +397,4 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 }
+

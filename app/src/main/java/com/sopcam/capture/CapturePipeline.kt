@@ -18,6 +18,8 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import androidx.exifinterface.media.ExifInterface
 import androidx.lifecycle.LifecycleOwner
+import com.sopcam.meta.ImageMeta
+import com.sopcam.meta.Xmp
 import com.sopcam.watermark.Anchor
 import com.sopcam.watermark.WatermarkContent
 import com.sopcam.watermark.WatermarkRenderer
@@ -31,28 +33,33 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.Executors
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
 /**
  * 一次待落盘的任务。快门回调只做「拿字节 + 入队」，微秒级返回，
- * 所以连拍时快门不会被烧录和编码拖住 —— 这是"性能要求高"的关键。
+ * 所以连拍时快门不会被烧录和编码拖住 —— 这是性能的关键。
  */
 data class PendingShot(
     val jpeg: ByteArray,
-    val fileName: String,          // 不含扩展名，来自 SOP 步骤或语音备注
-    val relativePath: String,      // DCIM/SopCam/20260809/WO-2317
+    val fileName: String,
+    val relativePath: String,
     val content: WatermarkContent,
     val anchor: Anchor,
-    val style: WatermarkStyle,
+    val meta: ImageMeta,
+    val burnWatermark: Boolean,
+    val keepOriginal: Boolean,
+    val style: WatermarkStyle = WatermarkStyle(),
 )
 
 data class SavedShot(val uri: String, val displayName: String, val widthPx: Int, val heightPx: Int)
 
 class CapturePipeline(
     private val context: Context,
-    /** 落盘并发度。S25+ 上 2 就能吃满，再高只会抢内存 */
     concurrency: Int = 2,
     private val jpegQuality: Int = 92,
     private val maxLongSide: Int = 4032,
@@ -63,7 +70,6 @@ class CapturePipeline(
     private val queue = Channel<PendingShot>(capacity = 16)
     private val gate = Semaphore(concurrency)
 
-    /** 相机回调专用单线程池，别丢主线程 */
     val captureExecutor = Executors.newSingleThreadExecutor()
 
     init {
@@ -81,28 +87,59 @@ class CapturePipeline(
     }
 
     private suspend fun process(shot: PendingShot): SavedShot {
-        // CPU 密集：解码 → 正立 → 烧录
+        // 一次解码 → 正立。原图和水印图共用这张位图，只是编码两次。
         val bmp = WatermarkRenderer.decodeUpright(shot.jpeg, maxLongSide)
-        WatermarkRenderer.burnIn(bmp, shot.content, shot.anchor, shot.style)
+        val w = bmp.width
+        val h = bmp.height
 
-        val bytes = ByteArrayOutputStream(bmp.byteCount / 6).use { out ->
+        // 先出原图：这时候还没画任何东西，以后要改水印就是拿它重烧
+        if (shot.keepOriginal) {
+            val rawBytes = encode(bmp)
+            withContext(Dispatchers.IO) {
+                write(
+                    bytes = rawBytes,
+                    display = "${shot.fileName}.jpg",
+                    path = shot.relativePath.trimEnd('/') + "/RAW",
+                    meta = shot.meta.copy(hasWatermark = false),
+                    w = w, h = h,
+                )
+            }
+        }
+
+        val finalBytes = if (shot.burnWatermark) {
+            WatermarkRenderer.burnIn(bmp, shot.content, shot.anchor, shot.style)
+            encode(bmp)
+        } else {
+            // 关掉可见水印时不重复编码，直接复用原图那份字节
+            encode(bmp)
+        }
+        bmp.recycle()
+
+        return withContext(Dispatchers.IO) {
+            write(finalBytes, "${shot.fileName}.jpg", shot.relativePath, shot.meta, w, h)
+        }
+    }
+
+    private fun encode(bmp: Bitmap): ByteArray =
+        ByteArrayOutputStream(bmp.byteCount / 6).use { out ->
             bmp.compress(Bitmap.CompressFormat.JPEG, jpegQuality, out)
             out.toByteArray()
         }
-        val w = bmp.width; val h = bmp.height
-        bmp.recycle()
 
-        return withContext(Dispatchers.IO) { writeToMediaStore(shot, bytes, w, h) }
-    }
+    private val exifDateFmt = SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US)
 
-    private fun writeToMediaStore(
-        shot: PendingShot, bytes: ByteArray, w: Int, h: Int,
+    private fun write(
+        bytes: ByteArray,
+        display: String,
+        path: String,
+        meta: ImageMeta,
+        w: Int,
+        h: Int,
     ): SavedShot {
-        val display = "${shot.fileName}.jpg"
         val values = ContentValues().apply {
             put(MediaStore.Images.Media.DISPLAY_NAME, display)
             put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-            put(MediaStore.Images.Media.RELATIVE_PATH, shot.relativePath)
+            put(MediaStore.Images.Media.RELATIVE_PATH, path)
             put(MediaStore.Images.Media.WIDTH, w)
             put(MediaStore.Images.Media.HEIGHT, h)
             put(MediaStore.Images.Media.IS_PENDING, 1)
@@ -113,16 +150,38 @@ class CapturePipeline(
 
         resolver.openOutputStream(uri)!!.use { it.write(bytes) }
 
-        // 图已物理正立，EXIF 必须写 NORMAL，否则电脑端会再转一次
+        // EXIF 走标准字段。图已物理正立，Orientation 必须写 NORMAL，
+        // 否则电脑端看图软件会照着标记再转一次。
         resolver.openFileDescriptor(uri, "rw")!!.use { pfd ->
             ExifInterface(pfd.fileDescriptor).apply {
                 setAttribute(
                     ExifInterface.TAG_ORIENTATION,
                     ExifInterface.ORIENTATION_NORMAL.toString()
                 )
-                setAttribute(ExifInterface.TAG_IMAGE_DESCRIPTION, shot.fileName)
+                val stamp = exifDateFmt.format(Date(meta.capturedAt))
+                setAttribute(ExifInterface.TAG_DATETIME, stamp)
+                setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, stamp)
+                setAttribute(ExifInterface.TAG_MAKE, meta.deviceMake)
+                setAttribute(ExifInterface.TAG_MODEL, meta.deviceModel)
+                setAttribute(ExifInterface.TAG_SOFTWARE, "SopCam")
+                setAttribute(
+                    ExifInterface.TAG_IMAGE_DESCRIPTION,
+                    listOf(meta.stepName, meta.workOrder).filter { it.isNotBlank() }
+                        .joinToString(" / ")
+                )
+                if (meta.latitude != null && meta.longitude != null) {
+                    setLatLong(meta.latitude, meta.longitude)
+                }
                 saveAttributes()
             }
+        }
+
+        // XMP 走自定义命名空间。必须在 ExifInterface 之后插 ——
+        // saveAttributes 会重写整个 JPEG 段结构，先插进去有被丢掉的风险。
+        runCatching {
+            val current = resolver.openInputStream(uri)!!.use { it.readBytes() }
+            val withXmp = Xmp.inject(current, Xmp.build(meta))
+            resolver.openOutputStream(uri, "wt")!!.use { it.write(withXmp) }
         }
 
         values.clear()
@@ -148,14 +207,14 @@ class CapturePipeline(
 object CameraBinder {
 
     /**
-     * S25+ 上的取舍：主摄 200MP 原图单张解码就要 1s+，检修留档没必要。
-     * 锁到 4:3 约 12MP（4000×3000 附近），快门到可拍下一张约 120–200ms。
-     * 想要更高细节改成 ResolutionStrategy(Size(8160, 6120), FALLBACK_RULE_CLOSEST_LOWER)。
+     * S25+ 主摄 200MP，但单张 200MP 解码就要一秒以上，检修留档没必要。
+     * 锁 4:3 约 12MP，快门到可拍下一张约 120–200ms。
+     * 要更高细节就把 Size 改成 8160x6120，代价是单张 ~600ms。
      */
     fun buildImageCapture(initialRotation: Int): ImageCapture =
         ImageCapture.Builder()
             .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-            .setJpegQuality(95)                       // 原始质量拉高，压缩损失留给烧录那一次
+            .setJpegQuality(95)
             .setTargetRotation(initialRotation)
             .setResolutionSelector(
                 ResolutionSelector.Builder()
@@ -194,25 +253,13 @@ object CameraBinder {
 }
 
 /** 快门：只取字节、只入队，不做任何图像处理 */
-fun ImageCapture.shoot(
-    pipeline: CapturePipeline,
-    fileName: String,
-    relativePath: String,
-    content: WatermarkContent,
-    anchor: Anchor,
-    style: WatermarkStyle = WatermarkStyle(),
-    onShutter: () -> Unit = {},
-) {
+fun ImageCapture.shoot(pipeline: CapturePipeline, shot: (ByteArray) -> PendingShot) {
     takePicture(pipeline.captureExecutor, object : ImageCapture.OnImageCapturedCallback() {
-        override fun onCaptureStarted() = onShutter()
-
         override fun onCaptureSuccess(image: ImageProxy) {
             val buf = image.planes[0].buffer
             val bytes = ByteArray(buf.remaining()).also { buf.get(it) }
             image.close()
-            pipeline.submit(
-                PendingShot(bytes, fileName, relativePath, content, anchor, style)
-            )
+            pipeline.submit(shot(bytes))
         }
 
         override fun onError(exception: ImageCaptureException) {

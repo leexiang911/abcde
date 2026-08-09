@@ -52,6 +52,12 @@ val Done = Color(0xFF4CC38A)
 
 @Composable
 fun SetupScreen(
+    modelOption: PickOption?,
+    platformOption: PickOption?,
+    platformEnabled: Boolean,
+    onModelTap: () -> Unit,
+    onPlatformTap: () -> Unit,
+    onSettings: () -> Unit,
     workOrder: String,
     serialNo: String,
     templates: List<SopTemplate>,
@@ -71,14 +77,40 @@ fun SetupScreen(
             .padding(20.dp)
     ) {
         Spacer(Modifier.height(28.dp))
-        Text("开工", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("开工", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+            Action("设置", onSettings)
+        }
         Spacer(Modifier.height(4.dp))
         Text(
-            "工单号和序列号会写进水印，也决定照片存在哪个文件夹",
+            "这些信息会写进照片的水印和元数据，也决定照片存在哪个文件夹",
             color = Steel, fontSize = 13.sp
         )
 
         Spacer(Modifier.height(24.dp))
+        Row(Modifier.fillMaxWidth()) {
+            PickerField(
+                label = "控制器型号",
+                selected = modelOption,
+                hint = "选择",
+                modifier = Modifier.weight(1f).padding(end = 6.dp),
+                onTap = onModelTap
+            )
+            PickerField(
+                label = "分类平台",
+                selected = platformOption,
+                hint = if (platformEnabled) "选择" else "先选型号",
+                enabled = platformEnabled,
+                modifier = Modifier.weight(1f).padding(start = 6.dp),
+                onTap = onPlatformTap
+            )
+        }
+
+        Spacer(Modifier.height(18.dp))
         Field("工单号", workOrder, "GZJ20260728025832", onWorkOrderChange)
         Spacer(Modifier.height(14.dp))
         Field("控制器序列号", serialNo, "0104215HZN92952565", onSerialChange)
