@@ -1,49 +1,55 @@
 package com.sopcam.ui
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sopcam.watermark.Anchor
 import com.sopcam.watermark.TopEdge
 import com.sopcam.watermark.previewCornerIndex
 import com.sopcam.watermark.quarterTurns
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 
 /* ==================================================================
  * 取景器上的实时水印
- *
- * 不是装饰，是成片的等比示意：位置、角度、内容都跟烧录出来的一致。
- * 锁了方向之后它在屏幕上会躺倒——那正是要传达的信息：
- * 成片会把这块转正，你看到的是它转过去之前的样子。
  * ================================================================== */
 
 /** 顺时针环：左上 → 右上 → 右下 → 左下 */
@@ -89,7 +95,6 @@ fun BoxScope.WatermarkPreview(
     }
 }
 
-/** 贴在取景框边缘的「成片上方」角标，比水印本身更快能确认方向 */
 @Composable
 fun BoxScope.TopEdgeMarker(edge: TopEdge, effective: TopEdge) {
     val shown = if (edge == TopEdge.AUTO) effective else edge
@@ -115,9 +120,6 @@ fun BoxScope.TopEdgeMarker(edge: TopEdge, effective: TopEdge) {
 
 /* ==================================================================
  * 方向：十字盘
- *
- * 四个方向按它在手机上的实际位置摆——想让成片顶部朝左，就点左边那格，
- * 不用在脑子里做一次映射。中间是自动。
  * ================================================================== */
 
 @Composable
@@ -177,10 +179,7 @@ private fun DialCell(label: String, active: Boolean, wide: Boolean = false, onCl
 }
 
 /* ==================================================================
- * 水印位置：田字格
- *
- * 整块格子跟着成片方向一起转，所以「点哪个小格」= 水印出现在屏幕的哪个位置，
- * 不用再想成片转过去之后会落到哪。
+ * 水印位置：田字格，中间禁止符，四周旋转标签
  * ================================================================== */
 
 /** 成片坐标系下的四个角，按行优先排：左上 右上 / 左下 右下 */
@@ -204,7 +203,6 @@ fun AnchorButton(anchor: Anchor, edge: TopEdge, visible: Boolean, onToggle: () -
     }
 }
 
-/** 收起时的小图标：一个田字，亮着的那格就是水印的位置 */
 @Composable
 private fun MiniGrid(anchor: Anchor, edge: TopEdge) {
     Column(Modifier.rotate(edge.quarterTurns() * 90f)) {
@@ -226,31 +224,6 @@ private fun MiniGrid(anchor: Anchor, edge: TopEdge) {
     }
 }
 
-/**
- * 禁止符：圆圈 + 斜杠，中间一个 A。
- * 用 Canvas 画而不是找图标库，省一个依赖，也好控制粗细跟边框对齐。
- */
-@Composable
-private fun BlockedBadge(size: Dp, letter: TextUnit, tint: Color) {
-    Box(Modifier.size(size), contentAlignment = Alignment.Center) {
-        Canvas(Modifier.fillMaxSize()) {
-            val stroke = this.size.minDimension * 0.09f
-            val r = (this.size.minDimension - stroke) / 2f
-            val c = Offset(this.size.width / 2f, this.size.height / 2f)
-            drawCircle(tint, radius = r, center = c, style = Stroke(width = stroke))
-            val d = r * 0.707f
-            drawLine(
-                tint,
-                start = Offset(c.x - d, c.y + d),
-                end = Offset(c.x + d, c.y - d),
-                strokeWidth = stroke,
-                cap = StrokeCap.Round
-            )
-        }
-        Text("A", color = tint, fontSize = letter, fontWeight = FontWeight.Bold)
-    }
-}
-
 @Composable
 fun AnchorGridPanel(
     anchor: Anchor,
@@ -259,23 +232,30 @@ fun AnchorGridPanel(
     onPick: (Anchor) -> Unit,
     onDisable: () -> Unit,
 ) {
-    Column(
+    val turns = edge.quarterTurns()
+
+    Box(
         Modifier
             .clip(RoundedCornerShape(10.dp))
             .background(Color(0xF2161A1F))
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .padding(10.dp),
+        contentAlignment = Alignment.Center
     ) {
-        Text(
-            if (visible) "水印位置" else "水印已关闭",
-            color = if (visible) Steel else Amber,
-            fontSize = 12.sp
-        )
-        Spacer(Modifier.height(12.dp))
+        // 标题绕着格子走：它停在哪一边，哪一边就是成片的上方。
+        // 这样标题本身就是方向指示，不用再单独画箭头。
+        Box(Modifier.size(184.dp), contentAlignment = ringSlot(turns)) {
+            Text(
+                if (visible) "水印位置" else "不加水印",
+                color = if (visible) Steel else Amber,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.rotate(turns * 90f)
+            )
+        }
 
-        // 关掉时四个角一起变暗——一眼能看出"现在谁也没选中"，
-        // 但仍然可点，点任意一格就等于重新打开并选中那个角。
-        Column(Modifier.rotate(edge.quarterTurns() * 90f)) {
+        // 关掉时四个角一起变暗，一眼看出现在谁也没选中。
+        // 但仍然可点：点任意一格等于重新打开并选中那个角。
+        Column(Modifier.rotate(turns * 90f)) {
             anchorGrid.forEach { row ->
                 Row {
                     row.forEach { a ->
@@ -299,24 +279,50 @@ fun AnchorGridPanel(
             }
         }
 
-        Spacer(Modifier.height(14.dp))
-        Row(
+        // 总闸压在四格正中。它不跟着转 —— 字母 A 得始终正着才认得出。
+        Box(
             Modifier
-                .clip(RoundedCornerShape(6.dp))
-                .background(if (visible) Color(0xF22A3037) else Amber)
-                .clickable(onClick = onDisable)
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .size(54.dp)
+                .clip(CircleShape)
+                .background(if (visible) Color(0xFF161A1F) else Amber)
+                .clickable(onClick = onDisable),
+            contentAlignment = Alignment.Center
         ) {
-            BlockedBadge(22.dp, 11.sp, if (visible) Steel else Ink)
-            Spacer(Modifier.width(10.dp))
-            Text(
-                "不加水印",
-                color = if (visible) Steel else Ink,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium
-            )
+            BlockedBadge(38.dp, 15.sp, if (visible) Steel else Ink)
         }
+    }
+}
+
+/** 标题停在格子哪一边，按成片上方所在的屏幕方位来 */
+private fun ringSlot(turns: Int) = when (turns) {
+    1 -> Alignment.CenterEnd
+    2 -> Alignment.BottomCenter
+    3 -> Alignment.CenterStart
+    else -> Alignment.TopCenter
+}
+
+@Composable
+private fun BlockedBadge(size: Dp, letter: TextUnit, tint: Color) {
+    Box(Modifier.size(size), contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
+            val stroke = this.size.minDimension * 0.075f
+            val r = (this.size.minDimension - stroke) / 2f
+            val c = Offset(this.size.width / 2f, this.size.height / 2f)
+            drawCircle(tint, radius = r, center = c, style = Stroke(width = stroke))
+            // 斜杠只画两截，中间让给字母 A —— 整条压过去 A 就糊了
+            val outer = r * 0.707f
+            val inner = r * 0.32f
+            listOf(1f, -1f).forEach { sign ->
+                drawLine(
+                    tint,
+                    start = Offset(c.x + outer * sign, c.y - outer * sign),
+                    end = Offset(c.x + inner * sign, c.y - inner * sign),
+                    strokeWidth = stroke,
+                    cap = StrokeCap.Round
+                )
+            }
+        }
+        Text("A", color = tint, fontSize = letter, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -358,3 +364,6 @@ fun RotatingTag(
         )
     }
 }
+
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
