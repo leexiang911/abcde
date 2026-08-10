@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -223,7 +224,7 @@ fun Modifier.zoomGestures(
     onDoubleTap: () -> Unit,
 ): Modifier = this
     .pointerInput(Unit) {
-        androidx.compose.foundation.gestures.detectTransformGestures { _, _, zoom, _ ->
+        detectTransformGestures { _, _, zoom, _ ->
             if (zoom != 1f) onPinch(zoom)
         }
     }
