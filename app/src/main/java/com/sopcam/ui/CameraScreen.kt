@@ -51,7 +51,7 @@ import com.sopcam.watermark.quarterTurns
  */
 
 /** 哪个面板展开着 */
-enum class OverlayPanel { NONE, ORIENTATION, ANCHOR }
+enum class OverlayPanel { NONE, ORIENTATION, ANCHOR, EXPOSURE }
 
 @Composable
 fun CameraScreen(
@@ -63,6 +63,13 @@ fun CameraScreen(
     edge: TopEdge,
     effectiveEdge: TopEdge,
     panel: OverlayPanel,
+    zoomRatio: Float,
+    minZoom: Float,
+    maxZoom: Float,
+    flashMode: FlashMode,
+    exposureIndex: Int,
+    exposureRange: IntRange,
+    evPerStep: Float,
     watermarkHeadline: String?,
     watermarkLines: List<String>,
     queueDepth: Int,
@@ -72,6 +79,10 @@ fun CameraScreen(
     onAnchorPick: (Anchor) -> Unit,
     onWatermarkDisable: () -> Unit,
     onEdgePick: (TopEdge) -> Unit,
+    onZoomPick: (Float) -> Unit,
+    onZoomPinch: (Float) -> Unit,
+    onFlashToggle: () -> Unit,
+    onExposureChange: (Int) -> Unit,
     onShutter: () -> Unit,
     onExit: () -> Unit,
     bindPreview: (PreviewView) -> Unit,
@@ -114,6 +125,10 @@ fun CameraScreen(
                     .aspectRatio(3f / 4f)
                     .clip(RectangleShape)
                     .background(Color.Black)
+                    .zoomGestures(
+                        onPinch = onZoomPinch,
+                        onDoubleTap = { onZoomPick(if (zoomRatio > 1.4f) 1f else 2f) }
+                    )
             ) {
                 AndroidView(
                     factory = { ctx ->
@@ -129,6 +144,16 @@ fun CameraScreen(
                     WatermarkPreview(watermarkHeadline, watermarkLines, anchor, effectiveEdge)
                 }
                 TopEdgeMarker(edge, effectiveEdge)
+
+                // 变焦档位压在取景框底部：手指本来就在这个区域，
+                // 不用为了换倍率把手挪到屏幕下沿去。
+                Box(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 12.dp)
+                ) {
+                    ZoomBar(zoomRatio, minZoom, maxZoom, onZoomPick)
+                }
             }
 
             lastSaved?.let {
@@ -151,6 +176,12 @@ fun CameraScreen(
                 watermarkVisible = watermarkVisible,
                 edge = edge,
                 effectiveEdge = effectiveEdge,
+                flashMode = flashMode,
+                exposureIndex = exposureIndex,
+                onFlashToggle = onFlashToggle,
+                onExposureTap = {
+                    onPanelChange(if (panel == OverlayPanel.EXPOSURE) OverlayPanel.NONE else OverlayPanel.EXPOSURE)
+                },
                 onOrientationTap = {
                     onPanelChange(if (panel == OverlayPanel.ORIENTATION) OverlayPanel.NONE else OverlayPanel.ORIENTATION)
                 },
@@ -181,6 +212,12 @@ fun CameraScreen(
                             onWatermarkDisable()
                             onPanelChange(OverlayPanel.NONE)
                         }
+                    )
+                    OverlayPanel.EXPOSURE -> ExposurePanel(
+                        index = exposureIndex,
+                        range = exposureRange,
+                        evPerStep = evPerStep,
+                        onChange = onExposureChange
                     )
                     OverlayPanel.NONE -> Unit
                 }
@@ -256,6 +293,10 @@ private fun ControlBar(
     watermarkVisible: Boolean,
     edge: TopEdge,
     effectiveEdge: TopEdge,
+    flashMode: FlashMode,
+    exposureIndex: Int,
+    onFlashToggle: () -> Unit,
+    onExposureTap: () -> Unit,
     onOrientationTap: () -> Unit,
     onAnchorTap: () -> Unit,
     onShutter: () -> Unit,
@@ -264,8 +305,20 @@ private fun ControlBar(
         Modifier
             .fillMaxWidth()
             .background(Panel)
-            .padding(vertical = 14.dp)
+            .padding(vertical = 12.dp)
     ) {
+        // 光学控制一行，留档控制一行 —— 两类东西改的频率不一样，分开不容易误触
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 24.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            FlashButton(flashMode, onFlashToggle)
+            ExposureButton(exposureIndex, onExposureTap)
+        }
+
+        Spacer(Modifier.height(10.dp))
+
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 24.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -275,7 +328,7 @@ private fun ControlBar(
             AnchorButton(anchor, effectiveEdge, watermarkVisible, onAnchorTap)
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(14.dp))
 
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
             Box(

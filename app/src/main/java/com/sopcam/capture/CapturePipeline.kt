@@ -252,6 +252,57 @@ object CameraBinder {
     }
 }
 
+/**
+ * 光学控制的薄封装。
+ *
+ * CameraX 把这几样分在两处：变焦和常亮在 CameraControl，
+ * 拍照瞬间的闪光在 ImageCapture。这里统一收口，界面层不用管这个区别。
+ */
+object Optics {
+
+    fun zoomRange(camera: Camera): Pair<Float, Float> {
+        val z = camera.cameraInfo.zoomState.value
+        return (z?.minZoomRatio ?: 1f) to (z?.maxZoomRatio ?: 1f)
+    }
+
+    fun currentZoom(camera: Camera): Float =
+        camera.cameraInfo.zoomState.value?.zoomRatio ?: 1f
+
+    /** 夹在设备真实范围内，超出会被 CameraX 直接拒绝 */
+    fun setZoom(camera: Camera, ratio: Float): Float {
+        val (lo, hi) = zoomRange(camera)
+        val target = ratio.coerceIn(lo, hi)
+        camera.cameraControl.setZoomRatio(target)
+        return target
+    }
+
+    fun exposureRange(camera: Camera): IntRange {
+        val st = camera.cameraInfo.exposureState
+        if (!st.isExposureCompensationSupported) return 0..0
+        return st.exposureCompensationRange.lower..st.exposureCompensationRange.upper
+    }
+
+    /** 一档等于多少 EV，各家不一样，得问相机要，不能写死 */
+    fun evPerStep(camera: Camera): Float {
+        val st = camera.cameraInfo.exposureState
+        if (!st.isExposureCompensationSupported) return 0f
+        return st.exposureCompensationStep.toFloat()
+    }
+
+    fun setExposure(camera: Camera, index: Int): Int {
+        val r = exposureRange(camera)
+        val target = index.coerceIn(r.first, r.last)
+        camera.cameraControl.setExposureCompensationIndex(target)
+        return target
+    }
+
+    fun applyFlash(camera: Camera?, imageCapture: ImageCapture, torch: Boolean, fireOnShot: Boolean) {
+        camera?.cameraControl?.enableTorch(torch)
+        imageCapture.flashMode =
+            if (fireOnShot) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF
+    }
+}
+
 /** 快门：只取字节、只入队，不做任何图像处理 */
 fun ImageCapture.shoot(pipeline: CapturePipeline, shot: (ByteArray) -> PendingShot) {
     takePicture(pipeline.captureExecutor, object : ImageCapture.OnImageCapturedCallback() {

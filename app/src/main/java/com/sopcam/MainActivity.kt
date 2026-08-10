@@ -14,6 +14,7 @@ import androidx.camera.core.ImageCapture
 import androidx.camera.core.Preview
 import androidx.camera.view.PreviewView
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -22,6 +23,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.sopcam.capture.CameraBinder
 import com.sopcam.capture.CapturePipeline
+import com.sopcam.capture.Optics
 import com.sopcam.capture.PendingShot
 import com.sopcam.capture.shoot
 import com.sopcam.meta.ImageMeta
@@ -34,7 +36,9 @@ import com.sopcam.sop.SettingsStore
 import com.sopcam.sop.SopStep
 import com.sopcam.sop.SopStore
 import com.sopcam.sop.SopTemplate
+import androidx.camera.core.Camera
 import com.sopcam.ui.CameraScreen
+import com.sopcam.ui.FlashMode
 import com.sopcam.ui.OverlayPanel
 import com.sopcam.ui.PermissionGate
 import com.sopcam.ui.PickOption
@@ -85,6 +89,14 @@ class MainActivity : ComponentActivity() {
     private var topEdge by mutableStateOf(TopEdge.AUTO)
     private var effectiveEdge by mutableStateOf(TopEdge.TOP)
     private var panel by mutableStateOf(OverlayPanel.NONE)
+    private var camera: Camera? = null
+    private var zoomRatio by mutableFloatStateOf(1f)
+    private var minZoom by mutableFloatStateOf(1f)
+    private var maxZoom by mutableFloatStateOf(1f)
+    private var flashMode by mutableStateOf(FlashMode.OFF)
+    private var exposureIndex by mutableIntStateOf(0)
+    private var exposureRange by mutableStateOf(0..0)
+    private var evPerStep by mutableFloatStateOf(0f)
     private var queueDepth by mutableIntStateOf(0)
     private var lastSaved by mutableStateOf<String?>(null)
 
@@ -248,6 +260,13 @@ class MainActivity : ComponentActivity() {
                     edge = topEdge,
                     effectiveEdge = effectiveEdge,
                     panel = panel,
+                    zoomRatio = zoomRatio,
+                    minZoom = minZoom,
+                    maxZoom = maxZoom,
+                    flashMode = flashMode,
+                    exposureIndex = exposureIndex,
+                    exposureRange = exposureRange,
+                    evPerStep = evPerStep,
                     watermarkHeadline = watermarkHeadline(),
                     watermarkLines = watermarkLines(System.currentTimeMillis()),
                     queueDepth = queueDepth,
@@ -270,9 +289,21 @@ class MainActivity : ComponentActivity() {
                         topEdge = it
                         orientation.topEdge = it
                     },
+                    onZoomPick = { r -> camera?.let { zoomRatio = Optics.setZoom(it, r) } },
+                    onZoomPinch = { f ->
+                        camera?.let { zoomRatio = Optics.setZoom(it, zoomRatio * f) }
+                    },
+                    onFlashToggle = {
+                        flashMode = flashMode.next()
+                        applyFlash()
+                    },
+                    onExposureChange = { i ->
+                        camera?.let { exposureIndex = Optics.setExposure(it, i) }
+                    },
                     onShutter = ::capture,
                     onExit = {
                         persist()
+                        camera?.cameraControl?.enableTorch(false)
                         screen = Screen.SETUP
                     },
                     bindPreview = ::bindPreview
@@ -334,10 +365,33 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             runCatching {
                 CameraBinder.bind(this@MainActivity, this@MainActivity, preview, imageCapture)
+            }.onSuccess { cam ->
+                withContext(Dispatchers.Main) {
+                    camera = cam
+                    // 能力值全部问相机要。S25+ 的超广角让 minZoom 到 0.6，
+                    // 写死 1.0 的话档位条上就不会出现 .6 这一档。
+                    val (lo, hi) = Optics.zoomRange(cam)
+                    minZoom = lo
+                    maxZoom = hi
+                    zoomRatio = Optics.currentZoom(cam)
+                    exposureRange = Optics.exposureRange(cam)
+                    evPerStep = Optics.evPerStep(cam)
+                    exposureIndex = Optics.setExposure(cam, exposureIndex)
+                    applyFlash()
+                }
             }.onFailure {
                 withContext(Dispatchers.Main) { lastSaved = "相机启动失败：${it.message}" }
             }
         }
+    }
+
+    private fun applyFlash() {
+        Optics.applyFlash(
+            camera = camera,
+            imageCapture = imageCapture,
+            torch = flashMode == FlashMode.TORCH,
+            fireOnShot = flashMode == FlashMode.ON,
+        )
     }
 
     private fun capture() {
@@ -391,6 +445,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        camera?.cameraControl?.enableTorch(false)
         orientation.disable()
         persist()
         super.onStop()
