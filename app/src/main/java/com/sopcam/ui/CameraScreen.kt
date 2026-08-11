@@ -42,6 +42,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import androidx.compose.ui.viewinterop.AndroidView
 import com.sopcam.sop.SopStep
 import com.sopcam.watermark.Anchor
@@ -77,6 +79,8 @@ fun CameraScreen(
     exposureRange: IntRange,
     evPerStep: Float,
     focusSpot: FocusSpot?,
+    focusNote: String?,
+    afSupported: Boolean,
     watermarkHeadline: String?,
     watermarkLines: List<String>,
     queueDepth: Int,
@@ -93,6 +97,7 @@ fun CameraScreen(
     onFocusTap: (Float, Float) -> Unit,
     onFocusLongStart: (Float, Float) -> Unit,
     onFocusLongEnd: (Boolean) -> Unit,
+    onFocusCancel: () -> Unit,
     onShutter: () -> Unit,
     onExit: () -> Unit,
     bindPreview: (PreviewView) -> Unit,
@@ -101,6 +106,8 @@ fun CameraScreen(
     val lockThresholdPx = with(LocalDensity.current) { 64.dp.toPx() }
     var dragX by remember { mutableFloatStateOf(0f) }
     var dragging by remember { mutableStateOf(false) }
+    // 点在对焦框范围内算取消，点别处算重新对焦
+    val reticleHalfPx = with(LocalDensity.current) { 42.dp.toPx() }
 
     Box(Modifier.fillMaxSize().background(Ink)) {
 
@@ -143,7 +150,13 @@ fun CameraScreen(
                     .pinchZoom(onZoomPinch)
                     .focusGestures(
                         lockThresholdPx = lockThresholdPx,
-                        onTap = onFocusTap,
+                        onTap = { x, y ->
+                            val hit = focusSpot?.let {
+                                abs(x - it.x) < reticleHalfPx &&
+                                    abs(y - it.y) < reticleHalfPx
+                            } ?: false
+                            if (hit) onFocusCancel() else onFocusTap(x, y)
+                        },
                         onLongStart = { x, y ->
                             dragX = 0f
                             dragging = true
@@ -192,8 +205,34 @@ fun CameraScreen(
                 }
             }
 
-            lastSaved?.let {
+            // 对焦提示优先于存盘提示 —— 拍不清楚比存到哪更要紧
+            focusNote?.let {
                 Spacer(Modifier.height(8.dp))
+                Text(
+                    it,
+                    color = Amber,
+                    fontSize = 12.sp,
+                    maxLines = 2,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+            }
+
+            // 临时调试行，问题定位完就删
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "调试 ${(zoomRatio * 10).roundToInt() / 10f}× · 范围 " +
+                    "${(minZoom * 10).roundToInt() / 10f}–${(maxZoom * 10).roundToInt() / 10f}" +
+                    " · 对焦${if (afSupported) "支持" else "不支持"}" +
+                    " · ${focusSpot?.status?.name ?: "无"}",
+                color = Color(0xFF4A525C),
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 1,
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
+
+            lastSaved?.let {
+                Spacer(Modifier.height(6.dp))
                 Text(
                     "已存 $it",
                     color = Steel,

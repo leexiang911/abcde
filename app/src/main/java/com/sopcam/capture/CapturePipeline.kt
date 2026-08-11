@@ -312,17 +312,29 @@ object Optics {
         executor: Executor,
         onResult: (Boolean) -> Unit,
     ) {
-        val action = FocusMeteringAction.Builder(
-            point,
-            FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE
-        ).disableAutoCancel().build()
-
+        val action = buildAction(point)
         val future = camera.cameraControl.startFocusAndMetering(action)
         future.addListener({
             // 对焦被新的对焦请求打断时 get() 会抛，按失败处理
-            onResult(runCatching { future.get().isFocusSuccessful }.getOrDefault(false))
+            val ok = runCatching { future.get().isFocusSuccessful }.getOrDefault(false)
+
+            // 失败必须立刻放开 3A 锁。
+            // disableAutoCancel 的本意是"焦点别自己跑掉"，但对焦失败后锁还扣着，
+            // 三星在 AF 锁未释放时会直接忽略 setZoomRatio —— 表现就是变焦点不动，
+            // 退出相机重新 bind 换了 CameraControl 才恢复。
+            if (!ok) camera.cameraControl.cancelFocusAndMetering()
+            onResult(ok)
         }, executor)
     }
+
+    private fun buildAction(point: MeteringPoint) = FocusMeteringAction.Builder(
+        point,
+        FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE
+    ).disableAutoCancel().build()
+
+    fun isFocusSupported(camera: Camera, point: MeteringPoint): Boolean =
+        runCatching { camera.cameraInfo.isFocusMeteringSupported(buildAction(point)) }
+            .getOrDefault(false)
 
     fun cancelFocus(camera: Camera?) {
         camera?.cameraControl?.cancelFocusAndMetering()

@@ -101,6 +101,8 @@ class MainActivity : ComponentActivity() {
     private var evPerStep by mutableFloatStateOf(0f)
     private var previewView: PreviewView? = null
     private var focusSpot by mutableStateOf<FocusSpot?>(null)
+    private var focusNote by mutableStateOf<String?>(null)
+    private var afSupported by mutableStateOf(false)
     private var queueDepth by mutableIntStateOf(0)
     private var lastSaved by mutableStateOf<String?>(null)
 
@@ -272,6 +274,8 @@ class MainActivity : ComponentActivity() {
                     exposureRange = exposureRange,
                     evPerStep = evPerStep,
                     focusSpot = focusSpot,
+                    focusNote = focusNote,
+                    afSupported = afSupported,
                     watermarkHeadline = watermarkHeadline(),
                     watermarkLines = watermarkLines(System.currentTimeMillis()),
                     queueDepth = queueDepth,
@@ -294,7 +298,12 @@ class MainActivity : ComponentActivity() {
                         topEdge = it
                         orientation.topEdge = it
                     },
-                    onZoomPick = { r -> camera?.let { zoomRatio = Optics.setZoom(it, r) } },
+                    onZoomPick = { r ->
+                        // 换倍率可能换物理镜头，原来锁的焦点没意义了；
+                        // 顺带把可能残留的 3A 锁放掉，免得挡住 setZoomRatio
+                        releaseFocus()
+                        camera?.let { zoomRatio = Optics.setZoom(it, r) }
+                    },
                     onZoomPinch = { f ->
                         camera?.let { zoomRatio = Optics.setZoom(it, zoomRatio * f) }
                     },
@@ -305,10 +314,8 @@ class MainActivity : ComponentActivity() {
                     onExposureChange = { i ->
                         camera?.let { exposureIndex = Optics.setExposure(it, i) }
                     },
-                    onFocusTap = { x, y ->
-                        // 短按：已经锁着就先解锁，再在新位置做一次单次对焦
-                        focusAt(x, y, persistent = false)
-                    },
+                    onFocusTap = { x, y -> focusAt(x, y, persistent = false) },
+                    onFocusCancel = ::releaseFocus,
                     onFocusLongStart = { x, y -> focusAt(x, y, persistent = true) },
                     onFocusLongEnd = { armed ->
                         // 拖到位才留着当持久锁，没拖到位就降级成单次
@@ -394,6 +401,9 @@ class MainActivity : ComponentActivity() {
                     exposureRange = Optics.exposureRange(cam)
                     evPerStep = Optics.evPerStep(cam)
                     exposureIndex = Optics.setExposure(cam, exposureIndex)
+                    afSupported = previewView?.let {
+                        Optics.isFocusSupported(cam, it.meteringPointFactory.createPoint(0.5f, 0.5f))
+                    } ?: false
                     applyFlash()
                 }
             }.onFailure {
@@ -412,19 +422,33 @@ class MainActivity : ComponentActivity() {
         val cam = camera ?: return
         val pv = previewView ?: return
 
-        focusSpot = FocusSpot(x, y, FocusStatus.FOCUSING, persistent)
         val point = pv.meteringPointFactory.createPoint(x, y)
+        if (!Optics.isFocusSupported(cam, point)) {
+            focusNote = "这颗镜头不支持点按对焦"
+            return
+        }
+
+        focusSpot = FocusSpot(x, y, FocusStatus.FOCUSING, persistent)
+        focusNote = null
 
         Optics.startFocus(cam, point, ContextCompat.getMainExecutor(this)) { ok ->
             focusSpot = focusSpot?.copy(
                 status = if (ok) FocusStatus.OK else FocusStatus.FAILED
             )
+            // 超广角没有对焦马达，怎么点都是失败。
+            // 直说是硬件限制，免得用户以为是自己没点准，反复戳。
+            focusNote = when {
+                ok -> null
+                zoomRatio < 1f -> "超广角是定焦镜头，靠近拍请切回 1×"
+                else -> "对焦失败，换个有反差的位置试试"
+            }
         }
     }
 
     private fun releaseFocus() {
         Optics.cancelFocus(camera)
         focusSpot = null
+        focusNote = null
     }
 
     private fun applyFlash() {
