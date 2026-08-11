@@ -8,7 +8,9 @@ import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageProxy
+import androidx.camera.core.MeteringPoint
 import androidx.camera.core.Preview
 import androidx.camera.core.UseCaseGroup
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
@@ -36,6 +38,7 @@ import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
@@ -294,6 +297,35 @@ object Optics {
         val target = index.coerceIn(r.first, r.last)
         camera.cameraControl.setExposureCompensationIndex(target)
         return target
+    }
+
+    /**
+     * 触发一次对焦并测光。
+     *
+     * 两种模式都关掉 CameraX 的自动取消（默认 5 秒后自己解锁）——
+     * 单次由拍照后手动取消，持久锁一直留着，什么时候解锁由界面说了算。
+     * 不这么做的话，用户锁好焦点等着构图，5 秒一到焦点就悄悄跑了。
+     */
+    fun startFocus(
+        camera: Camera,
+        point: MeteringPoint,
+        executor: Executor,
+        onResult: (Boolean) -> Unit,
+    ) {
+        val action = FocusMeteringAction.Builder(
+            point,
+            FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE
+        ).disableAutoCancel().build()
+
+        val future = camera.cameraControl.startFocusAndMetering(action)
+        future.addListener({
+            // 对焦被新的对焦请求打断时 get() 会抛，按失败处理
+            onResult(runCatching { future.get().isFocusSuccessful }.getOrDefault(false))
+        }, executor)
+    }
+
+    fun cancelFocus(camera: Camera?) {
+        camera?.cameraControl?.cancelFocusAndMetering()
     }
 
     fun applyFlash(camera: Camera?, imageCapture: ImageCapture, torch: Boolean, fireOnShot: Boolean) {

@@ -3,6 +3,7 @@ package com.sopcam.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -218,16 +219,47 @@ fun ExposurePanel(
     }
 }
 
-/** 双击取景框在 1x 和上一次的倍率之间来回切，单手操作时比捏合快 */
-fun Modifier.zoomGestures(
-    onPinch: (Float) -> Unit,
-    onDoubleTap: () -> Unit,
-): Modifier = this
-    .pointerInput(Unit) {
+/** 捏合变焦。单独一个 pointerInput，跟对焦手势互不抢事件 */
+fun Modifier.pinchZoom(onPinch: (Float) -> Unit): Modifier =
+    this.pointerInput(Unit) {
         detectTransformGestures { _, _, zoom, _ ->
             if (zoom != 1f) onPinch(zoom)
         }
     }
+
+/**
+ * 对焦手势。
+ *
+ * 短按 → 单次对焦，拍完这张自动松开
+ * 长按并向左拖到锁标 → 持久锁定，之后每张都用这个焦点
+ * 已锁状态下长按向右拖回 → 解锁
+ *
+ * 这里刻意没做双击变焦：双击和单击并存时，单击必须等双击超时才触发，
+ * 对焦会慢半拍。变焦有档位条和捏合就够了，让位给对焦。
+ */
+fun Modifier.focusGestures(
+    lockThresholdPx: Float,
+    onTap: (Float, Float) -> Unit,
+    onLongStart: (Float, Float) -> Unit,
+    onDrag: (Float) -> Unit,
+    onLongEnd: (Boolean) -> Unit,
+): Modifier = this
     .pointerInput(Unit) {
-        detectTapGestures(onDoubleTap = { onDoubleTap() })
+        detectTapGestures { off -> onTap(off.x, off.y) }
+    }
+    .pointerInput(lockThresholdPx) {
+        var dx = 0f
+        detectDragGesturesAfterLongPress(
+            onDragStart = { off ->
+                dx = 0f
+                onLongStart(off.x, off.y)
+            },
+            onDrag = { change, amount ->
+                dx += amount.x
+                onDrag(dx)
+                change.consume()
+            },
+            onDragEnd = { onLongEnd(dx <= -lockThresholdPx) },
+            onDragCancel = { onLongEnd(false) },
+        )
     }

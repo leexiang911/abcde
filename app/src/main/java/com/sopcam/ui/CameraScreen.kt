@@ -24,6 +24,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -70,6 +76,7 @@ fun CameraScreen(
     exposureIndex: Int,
     exposureRange: IntRange,
     evPerStep: Float,
+    focusSpot: FocusSpot?,
     watermarkHeadline: String?,
     watermarkLines: List<String>,
     queueDepth: Int,
@@ -83,6 +90,9 @@ fun CameraScreen(
     onZoomPinch: (Float) -> Unit,
     onFlashToggle: () -> Unit,
     onExposureChange: (Int) -> Unit,
+    onFocusTap: (Float, Float) -> Unit,
+    onFocusLongStart: (Float, Float) -> Unit,
+    onFocusLongEnd: (Boolean) -> Unit,
     onShutter: () -> Unit,
     onExit: () -> Unit,
     bindPreview: (PreviewView) -> Unit,
@@ -125,9 +135,21 @@ fun CameraScreen(
                     .aspectRatio(3f / 4f)
                     .clip(RectangleShape)
                     .background(Color.Black)
-                    .zoomGestures(
-                        onPinch = onZoomPinch,
-                        onDoubleTap = { onZoomPick(if (zoomRatio > 1.4f) 1f else 2f) }
+                    .pinchZoom(onZoomPinch)
+                    .focusGestures(
+                        lockThresholdPx = lockThresholdPx,
+                        onTap = onFocusTap,
+                        onLongStart = { x, y ->
+                            dragX = 0f
+                            dragging = true
+                            onFocusLongStart(x, y)
+                        },
+                        onDrag = { dragX = it },
+                        onLongEnd = { armed ->
+                            dragging = false
+                            dragX = 0f
+                            onFocusLongEnd(armed)
+                        },
                     )
             ) {
                 AndroidView(
@@ -140,6 +162,15 @@ fun CameraScreen(
                     },
                     modifier = Modifier.fillMaxSize()
                 )
+                focusSpot?.let {
+                    FocusReticle(
+                        spot = it,
+                        dragX = dragX,
+                        dragging = dragging,
+                        lockArmed = dragX <= -lockThresholdPx,
+                    )
+                }
+
                 if (watermarkVisible) {
                     WatermarkPreview(watermarkHeadline, watermarkLines, anchor, effectiveEdge)
                 }

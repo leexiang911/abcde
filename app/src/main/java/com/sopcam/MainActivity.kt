@@ -13,6 +13,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.Preview
 import androidx.camera.view.PreviewView
+import androidx.core.content.ContextCompat
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -39,6 +40,8 @@ import com.sopcam.sop.SopTemplate
 import androidx.camera.core.Camera
 import com.sopcam.ui.CameraScreen
 import com.sopcam.ui.FlashMode
+import com.sopcam.ui.FocusSpot
+import com.sopcam.ui.FocusStatus
 import com.sopcam.ui.OverlayPanel
 import com.sopcam.ui.PermissionGate
 import com.sopcam.ui.PickOption
@@ -97,6 +100,8 @@ class MainActivity : ComponentActivity() {
     private var exposureIndex by mutableIntStateOf(0)
     private var exposureRange by mutableStateOf(0..0)
     private var evPerStep by mutableFloatStateOf(0f)
+    private var previewView: PreviewView? = null
+    private var focusSpot by mutableStateOf<FocusSpot?>(null)
     private var queueDepth by mutableIntStateOf(0)
     private var lastSaved by mutableStateOf<String?>(null)
 
@@ -267,6 +272,7 @@ class MainActivity : ComponentActivity() {
                     exposureIndex = exposureIndex,
                     exposureRange = exposureRange,
                     evPerStep = evPerStep,
+                    focusSpot = focusSpot,
                     watermarkHeadline = watermarkHeadline(),
                     watermarkLines = watermarkLines(System.currentTimeMillis()),
                     queueDepth = queueDepth,
@@ -300,10 +306,21 @@ class MainActivity : ComponentActivity() {
                     onExposureChange = { i ->
                         camera?.let { exposureIndex = Optics.setExposure(it, i) }
                     },
+                    onFocusTap = { x, y ->
+                        // 短按：已经锁着就先解锁，再在新位置做一次单次对焦
+                        focusAt(x, y, persistent = false)
+                    },
+                    onFocusLongStart = { x, y -> focusAt(x, y, persistent = true) },
+                    onFocusLongEnd = { armed ->
+                        // 拖到位才留着当持久锁，没拖到位就降级成单次
+                        focusSpot = focusSpot?.copy(locked = armed)
+                        if (!armed && focusSpot == null) Optics.cancelFocus(camera)
+                    },
                     onShutter = ::capture,
                     onExit = {
                         persist()
                         camera?.cameraControl?.enableTorch(false)
+                        releaseFocus()
                         screen = Screen.SETUP
                     },
                     bindPreview = ::bindPreview
@@ -359,6 +376,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun bindPreview(view: PreviewView) {
+        previewView = view
         val preview = Preview.Builder().build().apply {
             setSurfaceProvider(view.surfaceProvider)
         }
@@ -383,6 +401,31 @@ class MainActivity : ComponentActivity() {
                 withContext(Dispatchers.Main) { lastSaved = "相机启动失败：${it.message}" }
             }
         }
+    }
+
+    /**
+     * 触发对焦。
+     *
+     * 坐标换算交给 PreviewView 自带的 meteringPointFactory ——
+     * 它知道取景框的裁切和缩放方式，手算屏幕坐标转相机坐标很容易差一截。
+     */
+    private fun focusAt(x: Float, y: Float, persistent: Boolean) {
+        val cam = camera ?: return
+        val pv = previewView ?: return
+
+        focusSpot = FocusSpot(x, y, FocusStatus.FOCUSING, persistent)
+        val point = pv.meteringPointFactory.createPoint(x, y)
+
+        Optics.startFocus(cam, point, ContextCompat.getMainExecutor(this)) { ok ->
+            focusSpot = focusSpot?.copy(
+                status = if (ok) FocusStatus.OK else FocusStatus.FAILED
+            )
+        }
+    }
+
+    private fun releaseFocus() {
+        Optics.cancelFocus(camera)
+        focusSpot = null
     }
 
     private fun applyFlash() {
@@ -430,6 +473,9 @@ class MainActivity : ComponentActivity() {
                 keepOriginal = settings.keepOriginal,
             )
         }
+
+        // 单次对焦到此为止，持久锁留给下一张
+        if (focusSpot?.locked == false) releaseFocus()
 
         if (step != null) {
             val next = taken + 1
