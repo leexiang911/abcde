@@ -72,7 +72,7 @@ private enum class Screen { SETUP, TEMPLATE_EDIT, SETTINGS, CAMERA, SCAN }
 private enum class ScanTarget { WORK_ORDER, SERIAL }
 
 /** 开工页上弹出的哪个选择器 */
-private enum class Sheet { NONE, MODEL, PLATFORM }
+private enum class Sheet { NONE, MODEL, PLATFORM, TEMPLATE }
 
 class MainActivity : ComponentActivity() {
 
@@ -226,12 +226,16 @@ class MainActivity : ComponentActivity() {
                         activeTemplateId = templateId,
                         onWorkOrderChange = { workOrder = it },
                         onSerialChange = { serialNo = it },
-                        onTemplatePick = { id ->
-                            if (templateId != id) {
-                                templateId = id
-                                stepIndex = 0
-                                shotCounts = emptyMap()
-                            }
+                        templateOption = templates.firstOrNull { it.id == templateId }
+                            ?.let { PickOption(it.id, it.name, "${it.steps.size} 个拍摄点位") },
+                        activeTemplate = templates.firstOrNull { it.id == templateId },
+                        onTemplateTap = { sheet = Sheet.TEMPLATE },
+                        onStartFreeform = {
+                            templateId = ""
+                            stepIndex = 0
+                            shotCounts = emptyMap()
+                            persist()
+                            screen = Screen.CAMERA
                         },
                         onNewTemplate = { screen = Screen.TEMPLATE_EDIT },
                         onDeleteTemplate = { id ->
@@ -263,6 +267,23 @@ class MainActivity : ComponentActivity() {
                             selectedId = platformId,
                             onPick = { opt ->
                                 platformId = opt?.id ?: ""
+                                sheet = Sheet.NONE
+                            },
+                            onDismiss = { sheet = Sheet.NONE }
+                        )
+                        Sheet.TEMPLATE -> PickerSheet(
+                            title = "检修流程",
+                            options = templates.map {
+                                PickOption(it.id, it.name, "${it.steps.size} 个拍摄点位")
+                            },
+                            selectedId = templateId,
+                            onPick = { opt ->
+                                val id = opt?.id ?: ""
+                                if (templateId != id) {
+                                    templateId = id
+                                    stepIndex = 0
+                                    shotCounts = emptyMap()
+                                }
                                 sheet = Sheet.NONE
                             },
                             onDismiss = { sheet = Sheet.NONE }

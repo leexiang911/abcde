@@ -1,5 +1,10 @@
 package com.sopcam.ui
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -66,7 +71,10 @@ fun SetupScreen(
     activeTemplateId: String,
     onWorkOrderChange: (String) -> Unit,
     onSerialChange: (String) -> Unit,
-    onTemplatePick: (String) -> Unit,
+    templateOption: PickOption?,
+    activeTemplate: SopTemplate?,
+    onTemplateTap: () -> Unit,
+    onStartFreeform: () -> Unit,
     onNewTemplate: () -> Unit,
     onDeleteTemplate: (String) -> Unit,
     onStart: () -> Unit,
@@ -89,33 +97,32 @@ fun SetupScreen(
         }
         Spacer(Modifier.height(4.dp))
         Text(
-            "这些信息会写进照片的水印和元数据，也决定照片存在哪个文件夹",
+            "照片将自动绑定工单信息",
             color = Steel, fontSize = 13.sp
         )
 
         Spacer(Modifier.height(24.dp))
-        Row(Modifier.fillMaxWidth()) {
-            PickerField(
-                label = "控制器型号",
-                selected = modelOption,
-                hint = "选择",
-                modifier = Modifier.weight(1f).padding(end = 6.dp),
-                onTap = onModelTap
-            )
-            PickerField(
-                label = "分类平台",
-                selected = platformOption,
-                hint = if (platformEnabled) "选择" else "先选型号",
-                enabled = platformEnabled,
-                modifier = Modifier.weight(1f).padding(start = 6.dp),
-                onTap = onPlatformTap
-            )
-        }
-
-        Spacer(Modifier.height(18.dp))
         Field("工单号", workOrder, "GZJ20260728025832", onWorkOrderChange, onScanWorkOrder)
         Spacer(Modifier.height(14.dp))
         Field("控制器序列号", serialNo, "0104215HZN92952565", onSerialChange, onScanSerial)
+
+        Spacer(Modifier.height(14.dp))
+        PickerField(
+            label = "控制器型号",
+            selected = modelOption,
+            hint = "请选择控制器型号",
+            modifier = Modifier.fillMaxWidth(),
+            onTap = onModelTap
+        )
+        Spacer(Modifier.height(14.dp))
+        PickerField(
+            label = "所属平台",
+            selected = platformOption,
+            hint = if (platformEnabled) "请选择平台" else "先选型号",
+            enabled = platformEnabled,
+            modifier = Modifier.fillMaxWidth(),
+            onTap = onPlatformTap
+        )
 
         Spacer(Modifier.height(28.dp))
         Row(
@@ -139,51 +146,51 @@ fun SetupScreen(
                     .padding(16.dp)
             )
         } else {
-            templates.forEach { t ->
-                val active = t.id == activeTemplateId
+            // 流程多起来之后逐条平铺会把页面撑得很长，收进下拉里
+            PickerField(
+                label = "",
+                selected = templateOption,
+                hint = "请选择检修流程",
+                modifier = Modifier.fillMaxWidth(),
+                onTap = onTemplateTap
+            )
+            activeTemplate?.let { t ->
+                Spacer(Modifier.height(10.dp))
                 Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 10.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Panel)
-                        .border(
-                            if (active) 2.dp else 1.dp,
-                            if (active) Amber else Color(0xFF2A3037),
-                            RoundedCornerShape(8.dp)
-                        )
-                        .clickable { onTemplatePick(t.id) }
-                        .padding(16.dp),
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            t.name,
-                            color = if (active) Amber else Color.White,
-                            fontSize = 16.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text("${t.steps.size} 个拍摄点位", color = Steel, fontSize = 13.sp)
-                    }
+                    Text("${t.steps.size} 个拍摄点位", color = Steel, fontSize = 13.sp)
                     Text(
-                        "删除",
+                        "删除这个流程",
                         color = Steel,
                         fontSize = 13.sp,
                         modifier = Modifier
                             .clickable { onDeleteTemplate(t.id) }
-                            .padding(horizontal = 10.dp, vertical = 12.dp)
+                            .padding(vertical = 6.dp)
                     )
                 }
             }
         }
 
         Spacer(Modifier.height(28.dp))
-        PrimaryButton(
-            label = if (activeTemplateId.isBlank()) "不用流程，直接拍" else "开始拍摄",
-            onClick = onStart
-        )
+        PrimaryButton(label = "开始检修拍摄", onClick = onStart)
+
+        // 跳过流程降级成小字：核心价值是按 SOP 拍，不该让人第一眼就想着绕开
+        if (activeTemplateId.isNotBlank()) {
+            Spacer(Modifier.height(14.dp))
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text(
+                    "跳过流程，直接拍  ›",
+                    color = Steel,
+                    fontSize = 13.sp,
+                    modifier = Modifier
+                        .clickable(onClick = onStartFreeform)
+                        .padding(vertical = 8.dp, horizontal = 12.dp)
+                )
+            }
+        }
         Spacer(Modifier.height(40.dp))
     }
 }
@@ -319,45 +326,43 @@ private fun Field(
     onScan: (() -> Unit)? = null,
 ) {
     Column {
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(label, color = Steel, fontSize = 13.sp)
-            onScan?.let {
-                Text(
-                    "扫码",
-                    color = Amber,
-                    fontSize = 12.sp,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .border(1.dp, Amber, RoundedCornerShape(4.dp))
-                        .clickable(onClick = it)
-                        .padding(horizontal = 10.dp, vertical = 5.dp)
-                )
-            }
-        }
+        Text(label, color = Steel, fontSize = 13.sp)
         Spacer(Modifier.height(6.dp))
-        Box(
+        Row(
             Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(8.dp))
                 .background(Panel)
                 .border(1.dp, Color(0xFF2A3037), RoundedCornerShape(8.dp))
-                .padding(horizontal = 14.dp, vertical = 16.dp)
+                .padding(start = 14.dp, end = 6.dp, top = 16.dp, bottom = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            if (value.isEmpty()) {
-                Text(hint, color = Color(0xFF4A525C), fontSize = 16.sp)
+            Box(Modifier.weight(1f)) {
+                if (value.isEmpty()) {
+                    Text(hint, color = Color(0xFF4A525C), fontSize = 16.sp)
+                }
+                BasicTextField(
+                    value = value,
+                    onValueChange = onChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    textStyle = TextStyle(color = Color.White, fontSize = 16.sp),
+                    cursorBrush = SolidColor(Amber)
+                )
             }
-            BasicTextField(
-                value = value,
-                onValueChange = onChange,
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                textStyle = TextStyle(color = Color.White, fontSize = 16.sp),
-                cursorBrush = SolidColor(Amber)
-            )
+            // 扫码收进输入框内 —— 扫和手输是同一件事的两种输入方式，
+            // 摆在一起视线不用来回跳，也跟微信支付宝的习惯一致
+            onScan?.let {
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable(onClick = it)
+                        .padding(8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    ScanGlyph()
+                }
+            }
         }
     }
 }
@@ -396,6 +401,35 @@ private fun PrimaryButton(
             color = if (enabled) Ink else Steel,
             fontSize = 16.sp,
             fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+/** 扫码图标：四角取景框加一道扫描线，跟相机里的对焦框同一套语言 */
+@Composable
+private fun ScanGlyph(size: Dp = 22.dp, tint: Color = Amber) {
+    Canvas(Modifier.size(size)) {
+        val w = 2.dp.toPx()
+        val arm = this.size.minDimension * 0.3f
+        val pad = w / 2f
+        val r = this.size.width - pad
+        val b = this.size.height - pad
+        listOf(
+            Offset(pad, pad + arm) to Offset(pad, pad),
+            Offset(pad, pad) to Offset(pad + arm, pad),
+            Offset(r - arm, pad) to Offset(r, pad),
+            Offset(r, pad) to Offset(r, pad + arm),
+            Offset(r, b - arm) to Offset(r, b),
+            Offset(r, b) to Offset(r - arm, b),
+            Offset(pad + arm, b) to Offset(pad, b),
+            Offset(pad, b) to Offset(pad, b - arm),
+        ).forEach { (a, c) -> drawLine(tint, a, c, strokeWidth = w, cap = StrokeCap.Round) }
+        drawLine(
+            tint,
+            Offset(pad + arm * 0.2f, this.size.height / 2f),
+            Offset(r - arm * 0.2f, this.size.height / 2f),
+            strokeWidth = w,
+            cap = StrokeCap.Round
         )
     }
 }
