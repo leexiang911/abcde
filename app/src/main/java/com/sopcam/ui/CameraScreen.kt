@@ -97,6 +97,11 @@ fun CameraScreen(
     onExit: () -> Unit,
     bindPreview: (PreviewView) -> Unit,
 ) {
+    // 向左拖多远算锁定。太短容易误锁，太长单手够不着。
+    val lockThresholdPx = with(LocalDensity.current) { 64.dp.toPx() }
+    var dragX by remember { mutableFloatStateOf(0f) }
+    var dragging by remember { mutableStateOf(false) }
+
     Box(Modifier.fillMaxSize().background(Ink)) {
 
         Column(Modifier.fillMaxSize()) {
