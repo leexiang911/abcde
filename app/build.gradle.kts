@@ -48,6 +48,10 @@ dependencies {
     implementation("androidx.camera:camera-view:$cameraX")
 
     implementation("androidx.exifinterface:exifinterface:1.3.7")
+
+    // 内置模型：不依赖 Play Services，车间断网也能扫。代价是 APK 大 2–3MB
+    implementation("com.google.mlkit:barcode-scanning:17.3.0")
+    implementation("androidx.annotation:annotation-experimental:1.4.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
     implementation("androidx.core:core-ktx:1.13.1")
