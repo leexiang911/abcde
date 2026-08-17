@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -63,6 +64,7 @@ fun SetupScreen(
     onModelTap: () -> Unit,
     onPlatformTap: () -> Unit,
     onSettings: () -> Unit,
+    onProjects: () -> Unit,
     onScanSerial: () -> Unit,
     faultOption: PickOption?,
     onFaultTap: () -> Unit,
@@ -92,7 +94,11 @@ fun SetupScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text("开工", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
-            Action("设置", onSettings)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Action("项目", onProjects)
+                Spacer(Modifier.width(8.dp))
+                Action("设置", onSettings)
+            }
         }
         Spacer(Modifier.height(4.dp))
         Text(

@@ -27,6 +27,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.sopcam.capture.CameraBinder
 import com.sopcam.archive.Archive
+import com.sopcam.archive.Exporter
 import com.sopcam.crash.CrashLogger
 import com.sopcam.capture.CapturePipeline
 import com.sopcam.capture.CodeAnalyzer
@@ -50,6 +51,7 @@ import com.sopcam.sop.SopTemplate
 import androidx.camera.core.Camera
 import androidx.camera.core.ImageAnalysis
 import com.sopcam.ui.CameraScreen
+import com.sopcam.ui.ProjectsScreen
 import com.sopcam.ui.CrashScreen
 import com.sopcam.ui.ScanScreen
 import com.sopcam.ui.FlashMode
@@ -74,7 +76,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.UUID
 
-private enum class Screen { SETUP, TEMPLATE_EDIT, SETTINGS, CAMERA, SCAN }
+private enum class Screen { SETUP, TEMPLATE_EDIT, SETTINGS, CAMERA, SCAN, PROJECTS }
 
 /** 开工页上弹出的哪个选择器 */
 private enum class Sheet { NONE, MODEL, PLATFORM, FAULT, TEMPLATE }
@@ -120,6 +122,9 @@ class MainActivity : ComponentActivity() {
     private var focusNote by mutableStateOf<String?>(null)
     private var afSupported by mutableStateOf(false)
     private var archiveReady by mutableStateOf(false)
+    private var projects by mutableStateOf<List<Archive.Project>>(emptyList())
+    private var picked by mutableStateOf<Set<String>>(emptySet())
+    private var exporting by mutableStateOf<String?>(null)
     private lateinit var analysis: ImageAnalysis
     private var scannedCode by mutableStateOf<ScannedCode?>(null)
     private var faults by mutableStateOf<List<FaultType>>(emptyList())
@@ -227,6 +232,11 @@ class MainActivity : ComponentActivity() {
                         onModelTap = { sheet = Sheet.MODEL },
                         onPlatformTap = { if (activeModel != null) sheet = Sheet.PLATFORM },
                         onSettings = { screen = Screen.SETTINGS },
+                        onProjects = {
+                            projects = Archive.list()
+                            picked = emptySet()
+                            screen = Screen.PROJECTS
+                        },
                         onScanSerial = {
                             scannedCode = null
                             screen = Screen.SCAN
@@ -320,6 +330,24 @@ class MainActivity : ComponentActivity() {
                     bindPreview = ::bindScanner,
                     onCancel = {
                         scannedCode = null
+                        screen = Screen.SETUP
+                    }
+                )
+
+                Screen.PROJECTS -> ProjectsScreen(
+                    projects = projects,
+                    selected = picked,
+                    exporting = exporting,
+                    onToggle = { sn ->
+                        picked = if (sn in picked) picked - sn else picked + sn
+                    },
+                    onSelectAll = {
+                        picked = if (picked.size == projects.size) emptySet()
+                        else projects.map { it.serialNo }.toSet()
+                    },
+                    onExport = ::runExport,
+                    onBack = {
+                        picked = emptySet()
                         screen = Screen.SETUP
                     }
                 )
@@ -433,6 +461,30 @@ class MainActivity : ComponentActivity() {
      *
      * 这个权限没法用普通的权限弹窗要，只能跳系统页面让用户自己开。
      */
+    /**
+     * 打包在 IO 线程跑：几十兆的 zip 在主线程会把界面卡死。
+     * 打完直接拉起分享面板，用户接着就能发出去。
+     */
+    private fun runExport(opt: Exporter.Options) {
+        val serials = picked.toList()
+        if (serials.isEmpty() || !opt.any) return
+        exporting = "准备中…"
+        lifecycleScope.launch(Dispatchers.IO) {
+            val zip = Exporter.export(serials, opt) { done, total ->
+                lifecycleScope.launch(Dispatchers.Main) { exporting = "打包中 $done / $total" }
+            }
+            withContext(Dispatchers.Main) {
+                exporting = null
+                if (zip == null) {
+                    lastSaved = "导出失败"
+                } else {
+                    picked = emptySet()
+                    Exporter.share(this@MainActivity, zip)
+                }
+            }
+        }
+    }
+
     private fun openArchivePermission() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
         runCatching {
