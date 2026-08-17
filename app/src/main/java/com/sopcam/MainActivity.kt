@@ -28,6 +28,8 @@ import androidx.lifecycle.lifecycleScope
 import com.sopcam.capture.CameraBinder
 import com.sopcam.archive.Archive
 import com.sopcam.archive.Exporter
+import com.sopcam.archive.Purge
+import com.sopcam.archive.Thumbs
 import com.sopcam.crash.CrashLogger
 import com.sopcam.capture.CapturePipeline
 import com.sopcam.capture.CodeAnalyzer
@@ -51,7 +53,10 @@ import com.sopcam.sop.SopTemplate
 import androidx.camera.core.Camera
 import androidx.camera.core.ImageAnalysis
 import com.sopcam.ui.CameraScreen
+import com.sopcam.ui.ProjectDetailScreen
 import com.sopcam.ui.ProjectsScreen
+import com.sopcam.ui.ShotItem
+import com.sopcam.ui.readShots
 import com.sopcam.ui.CrashScreen
 import com.sopcam.ui.ScanScreen
 import com.sopcam.ui.FlashMode
@@ -76,7 +81,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.UUID
 
-private enum class Screen { SETUP, TEMPLATE_EDIT, SETTINGS, CAMERA, SCAN, PROJECTS }
+private enum class Screen { SETUP, TEMPLATE_EDIT, SETTINGS, CAMERA, SCAN, PROJECTS, PROJECT_DETAIL }
 
 /** 开工页上弹出的哪个选择器 */
 private enum class Sheet { NONE, MODEL, PLATFORM, FAULT, TEMPLATE }
@@ -125,6 +130,8 @@ class MainActivity : ComponentActivity() {
     private var projects by mutableStateOf<List<Archive.Project>>(emptyList())
     private var picked by mutableStateOf<Set<String>>(emptySet())
     private var exporting by mutableStateOf<String?>(null)
+    private var openProject by mutableStateOf<Archive.Project?>(null)
+    private var openShots by mutableStateOf<List<ShotItem>>(emptyList())
     private lateinit var analysis: ImageAnalysis
     private var scannedCode by mutableStateOf<ScannedCode?>(null)
     private var faults by mutableStateOf<List<FaultType>>(emptyList())
@@ -345,12 +352,43 @@ class MainActivity : ComponentActivity() {
                         picked = if (picked.size == projects.size) emptySet()
                         else projects.map { it.serialNo }.toSet()
                     },
+                    onOpen = { p ->
+                        openProject = p
+                        openShots = readShots(p.serialNo)
+                        screen = Screen.PROJECT_DETAIL
+                    },
                     onExport = ::runExport,
                     onBack = {
                         picked = emptySet()
                         screen = Screen.SETUP
                     }
                 )
+
+                Screen.PROJECT_DETAIL -> openProject?.let { p ->
+                    ProjectDetailScreen(
+                        project = p,
+                        shots = openShots,
+                        onDeleteShot = { item ->
+                            Purge.shot(item.file)
+                            Thumbs.evict(item.file)
+                            openShots = readShots(p.serialNo)
+                        },
+                        onDeleteProject = { alsoGallery ->
+                            Purge.archiveOf(p.serialNo)
+                            if (alsoGallery) Purge.galleryOf(this, p.serialNo)
+                            projects = Archive.list()
+                            picked = picked - p.serialNo
+                            openProject = null
+                            screen = Screen.PROJECTS
+                        },
+                        onBack = {
+                            // 可能在详情页删过图，回列表时张数要跟着变
+                            projects = Archive.list()
+                            openProject = null
+                            screen = Screen.PROJECTS
+                        }
+                    )
+                }
 
                 Screen.SETTINGS -> SettingsScreen(
                     settings = settings,

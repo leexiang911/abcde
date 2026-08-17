@@ -43,6 +43,7 @@ fun ProjectsScreen(
     selected: Set<String>,
     exporting: String?,
     onToggle: (String) -> Unit,
+    onOpen: (Archive.Project) -> Unit,
     onSelectAll: () -> Unit,
     onExport: (Exporter.Options) -> Unit,
     onBack: () -> Unit,
@@ -109,7 +110,12 @@ fun ProjectsScreen(
             } else {
                 LazyColumn(Modifier.weight(1f).padding(horizontal = 20.dp)) {
                     items(projects, key = { it.serialNo }) { p ->
-                        ProjectRow(p, p.serialNo in selected) { onToggle(p.serialNo) }
+                        ProjectRow(
+                            p = p,
+                            checked = p.serialNo in selected,
+                            onCheck = { onToggle(p.serialNo) },
+                            onOpen = { onOpen(p) }
+                        )
                     }
                     item { Spacer(Modifier.height(if (sheetOpen) 220.dp else 24.dp)) }
                 }
@@ -125,7 +131,12 @@ fun ProjectsScreen(
 }
 
 @Composable
-private fun ProjectRow(p: Archive.Project, checked: Boolean, onTap: () -> Unit) {
+private fun ProjectRow(
+    p: Archive.Project,
+    checked: Boolean,
+    onCheck: () -> Unit,
+    onOpen: () -> Unit,
+) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -137,13 +148,14 @@ private fun ProjectRow(p: Archive.Project, checked: Boolean, onTap: () -> Unit) 
                 if (checked) Amber else Color(0xFF2A3037),
                 RoundedCornerShape(8.dp)
             )
-            .clickable(onClick = onTap)
+            .clickable(onClick = onOpen)
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             Modifier
                 .size(20.dp)
+                .clickable(onClick = onCheck)
                 .clip(RoundedCornerShape(4.dp))
                 .background(if (checked) Amber else Color.Transparent)
                 .border(
@@ -157,6 +169,7 @@ private fun ProjectRow(p: Archive.Project, checked: Boolean, onTap: () -> Unit) 
         }
 
         Spacer(Modifier.width(12.dp))
+
 
         Column(Modifier.weight(1f)) {
             Text(
@@ -239,7 +252,7 @@ private fun ExportBar(
 
         Spacer(Modifier.height(10.dp))
         Text(
-            "zip 里水印图和原图分开放，导出不会动原来的数据",
+            "点项目可以进去看图。zip 里水印图和原图分开放，导出不会动原来的数据",
             color = Color(0xFF4A525C),
             fontSize = 11.sp
         )

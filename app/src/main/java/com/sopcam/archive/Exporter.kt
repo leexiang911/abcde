@@ -31,22 +31,7 @@ object Exporter {
     private fun exportDir(): File =
         File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "SOP导出")
 
-    /**
-     * 水印照片按日期分目录存，同一个控制器跨天返修会落在不同日期下，
-     * 所以得把所有日期目录都翻一遍，按序列号收集。
-     */
-    fun watermarkedOf(serialNo: String): List<File> {
-        val root = File(
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "SopCam"
-        )
-        if (!root.exists()) return emptyList()
-        return root.listFiles { f -> f.isDirectory }
-            ?.flatMap { day ->
-                File(day, serialNo).takeIf { it.isDirectory }
-                    ?.listFiles { f -> f.extension.equals("jpg", true) }?.toList() ?: emptyList()
-            }
-            ?.sortedBy { it.name } ?: emptyList()
-    }
+    fun watermarkedOf(serialNo: String): List<File> = Gallery.photosOf(serialNo)
 
     fun originalsOf(serialNo: String): List<File> = Archive.shots(serialNo)
 

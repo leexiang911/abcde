@@ -1,6 +1,7 @@
 package com.sopcam.archive
 
 import android.content.Context
+import android.media.MediaScannerConnection
 import android.os.Build
 import android.os.Environment
 import com.sopcam.meta.ImageMeta
@@ -173,8 +174,63 @@ object Archive {
         projectDir(serialNo).listFiles { f -> f.extension == RAW_EXT }
             ?.sortedBy { it.name } ?: emptyList()
 
+    /** 删原图，随行的 json 一起删掉，不留孤儿文件 */
+    fun deleteShots(files: List<File>): Int = files.count { f ->
+        runCatching {
+            File(f.parentFile, f.nameWithoutExtension + ".json").delete()
+            f.delete()
+        }.getOrDefault(false)
+    }
+
+    /** 删整个项目的归档。原图没了就再也恢复不出水印图，调用方必须先确认过 */
+    fun deleteProject(serialNo: String): Boolean = runCatching {
+        projectDir(serialNo).deleteRecursively()
+    }.getOrDefault(false)
+
     fun sidecar(raw: File): JSONObject? = runCatching {
         val f = File(raw.parentFile, raw.nameWithoutExtension + ".json")
         if (f.exists()) JSONObject(f.readText()) else null
     }.getOrNull()
+}
+
+/* ------------------------------------------------------------------
+ * 删除
+ *
+ * 归档和相册是两份独立的数据，删除时必须分开决定：
+ * 删归档 = 失去重烧水印的兜底能力；删相册 = 只是删掉能看能发的成片。
+ * ------------------------------------------------------------------ */
+
+object Purge {
+
+    /** 删一张原图连同它的随行 json */
+    fun shot(raw: File): Boolean = runCatching {
+        File(raw.parentFile, raw.nameWithoutExtension + ".json").delete()
+        raw.delete()
+    }.getOrDefault(false)
+
+    /** 删整个项目的归档（原图 + 档案），相册里的水印图不动 */
+    fun archiveOf(serialNo: String): Boolean = runCatching {
+        Archive.projectDir(serialNo).deleteRecursively()
+    }.getOrDefault(false)
+
+    /**
+     * 删相册里该序列号的全部水印照片。
+     *
+     * 直接删文件会在 MediaStore 里留下失效条目，相册可能还显示着灰色缩略图，
+     * 所以删完要通知媒体库重新扫一遍这些路径。
+     */
+    fun galleryOf(ctx: Context, serialNo: String): Int {
+        val files = Exporter.watermarkedOf(serialNo)
+        val paths = files.map { it.absolutePath }
+        var n = 0
+        files.forEach { if (runCatching { it.delete() }.getOrDefault(false)) n++ }
+        // 清掉空的日期/序列号目录，免得相册里留一堆空相簿
+        files.map { it.parentFile }.distinct().forEach { dir ->
+            runCatching { if (dir != null && dir.listFiles().isNullOrEmpty()) dir.delete() }
+        }
+        runCatching {
+            MediaScannerConnection.scanFile(ctx, paths.toTypedArray(), null, null)
+        }
+        return n
+    }
 }
