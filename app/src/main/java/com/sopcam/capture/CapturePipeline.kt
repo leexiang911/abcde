@@ -21,6 +21,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import androidx.exifinterface.media.ExifInterface
 import androidx.lifecycle.LifecycleOwner
+import com.sopcam.archive.Archive
 import com.sopcam.meta.ImageMeta
 import com.sopcam.meta.Xmp
 import com.sopcam.watermark.Anchor
@@ -57,6 +58,8 @@ data class PendingShot(
     val meta: ImageMeta,
     val burnWatermark: Boolean,
     val keepOriginal: Boolean,
+    val headline: String? = null,
+    val lines: List<String> = emptyList(),
     val style: WatermarkStyle = WatermarkStyle(),
 )
 
@@ -96,16 +99,17 @@ class CapturePipeline(
         val w = bmp.width
         val h = bmp.height
 
-        // 先出原图：这时候还没画任何东西，以后要改水印就是拿它重烧
+        // 原图进归档区，不进相册 —— 相册里只放水印照片，
+        // 原图是给"以后重烧水印"用的兜底数据，混进相册只会看着乱
         if (shot.keepOriginal) {
             val rawBytes = encode(bmp)
             withContext(Dispatchers.IO) {
-                write(
-                    bytes = rawBytes,
-                    display = "${shot.fileName}.jpg",
-                    path = shot.relativePath.trimEnd('/') + "/RAW",
+                Archive.save(
+                    serialNo = shot.meta.serialNo,
+                    jpeg = rawBytes,
                     meta = shot.meta.copy(hasWatermark = false),
-                    w = w, h = h,
+                    watermarkLines = shot.lines,
+                    headline = shot.headline,
                 )
             }
         }
@@ -170,7 +174,7 @@ class CapturePipeline(
                 setAttribute(ExifInterface.TAG_SOFTWARE, "SopCam")
                 setAttribute(
                     ExifInterface.TAG_IMAGE_DESCRIPTION,
-                    listOf(meta.stepName, meta.workOrder).filter { it.isNotBlank() }
+                    listOf(meta.stepName, meta.serialNo).filter { it.isNotBlank() }
                         .joinToString(" / ")
                 )
                 if (meta.latitude != null && meta.longitude != null) {

@@ -31,6 +31,8 @@ import com.sopcam.sop.AppSettings
 @Composable
 fun SettingsScreen(
     settings: AppSettings,
+    archiveReady: Boolean,
+    onGrantArchive: () -> Unit,
     onChange: (AppSettings) -> Unit,
     onBack: () -> Unit,
 ) {
@@ -79,7 +81,7 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(10.dp))
         Text(
-            "工单号、序列号、控制器型号和平台不会画在照片上——那些是给机器读的，" +
+            "序列号、控制器型号、平台和故障类型不会画在照片上——那些是给机器读的，" +
                 "盖在板子上只会挡视线。它们只写进元数据。" +
                 "水印总开关在相机界面的田字格里，随手就能关。",
             color = Steel,
@@ -94,9 +96,30 @@ fun SettingsScreen(
         Spacer(Modifier.height(28.dp))
         SectionTitle("存储")
 
+        if (!archiveReady) {
+            // 归档区在公共 Documents 目录，读写自己的旧归档需要这个权限。
+            // 放公共目录是刻意的：App 私有目录卸载即清空，恢复功能就白做了。
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Panel)
+                    .clickable(onClick = onGrantArchive)
+                    .padding(16.dp)
+            ) {
+                Text("开启归档区权限", color = Amber, fontSize = 16.sp)
+                Spacer(Modifier.height(5.dp))
+                Text(
+                    "原图归档存在 Documents/SOP归档，需要「所有文件访问权限」才能读写。点这里去系统设置开启。",
+                    color = Steel, fontSize = 12.sp, lineHeight = 18.sp
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+        }
+
         SwitchRow(
             title = "同时保存无水印原图",
-            desc = "存到工单目录下的 RAW 子文件夹，同名。留着以后重烧水印用，代价是占用翻倍。",
+            desc = "存到 Documents/SOP归档，不进相册。水印照片删了能从这里恢复，代价是占用翻倍。",
             checked = settings.keepOriginal,
         ) { onChange(settings.copy(keepOriginal = it)) }
 
@@ -138,7 +161,7 @@ fun SettingsScreen(
         Spacer(Modifier.height(20.dp))
         Text(
             "无论水印开不开，每张照片都会写入：唯一 ID、拍摄时间、手机型号和系统版本、" +
-                "工单号、序列号、控制器型号、平台、SOP 步骤序号和名称。" +
+                "序列号、控制器型号、平台、故障类型、SOP 步骤序号和名称。" +
                 "所以以后想重新排版水印，照着元数据批量重烧就行。",
             color = Steel,
             fontSize = 13.sp,

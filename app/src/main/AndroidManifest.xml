@@ -6,6 +6,9 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- 归档区在公共 Documents 目录：重装后还要能读到自己的旧归档，
+         而 MediaStore 的非媒体文件只有创建它的那个 App 实例看得见 -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
 
     <uses-feature android:name="android.hardware.camera.any" android:required="true" />
 

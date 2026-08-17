@@ -5,7 +5,11 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
 import android.location.LocationManager
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.view.Surface
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -22,6 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.sopcam.capture.CameraBinder
+import com.sopcam.archive.Archive
 import com.sopcam.crash.CrashLogger
 import com.sopcam.capture.CapturePipeline
 import com.sopcam.capture.CodeAnalyzer
@@ -33,6 +38,8 @@ import com.sopcam.capture.shoot
 import com.sopcam.meta.ImageMeta
 import com.sopcam.sop.AppSettings
 import com.sopcam.sop.Catalog
+import com.sopcam.sop.FaultType
+import com.sopcam.sop.Faults
 import com.sopcam.sop.ControllerModel
 import com.sopcam.sop.FileNaming
 import com.sopcam.sop.Session
@@ -69,11 +76,8 @@ import java.util.UUID
 
 private enum class Screen { SETUP, TEMPLATE_EDIT, SETTINGS, CAMERA, SCAN }
 
-/** 扫码回来填哪个字段 */
-private enum class ScanTarget { WORK_ORDER, SERIAL }
-
 /** 开工页上弹出的哪个选择器 */
-private enum class Sheet { NONE, MODEL, PLATFORM, TEMPLATE }
+private enum class Sheet { NONE, MODEL, PLATFORM, FAULT, TEMPLATE }
 
 class MainActivity : ComponentActivity() {
 
@@ -91,8 +95,8 @@ class MainActivity : ComponentActivity() {
     private var catalog by mutableStateOf<List<ControllerModel>>(emptyList())
     private var settings by mutableStateOf(AppSettings())
 
-    private var workOrder by mutableStateOf("")
     private var serialNo by mutableStateOf("")
+    private var faultId by mutableStateOf("")
     private var modelId by mutableStateOf("")
     private var platformId by mutableStateOf("")
     private var templateId by mutableStateOf("")
@@ -115,14 +119,21 @@ class MainActivity : ComponentActivity() {
     private var focusSpot by mutableStateOf<FocusSpot?>(null)
     private var focusNote by mutableStateOf<String?>(null)
     private var afSupported by mutableStateOf(false)
+    private var archiveReady by mutableStateOf(false)
     private lateinit var analysis: ImageAnalysis
     private var scannedCode by mutableStateOf<ScannedCode?>(null)
-    private var scanTarget by mutableStateOf(ScanTarget.WORK_ORDER)
+    private var faults by mutableStateOf<List<FaultType>>(emptyList())
     private var queueDepth by mutableIntStateOf(0)
     private var lastSaved by mutableStateOf<String?>(null)
 
     /** 水印上的时间只到分钟 —— 秒对留档没意义，还占宽度 */
     private val stampFmt = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.CHINA)
+
+    private val activeFault: FaultType?
+        get() = faults.firstOrNull { it.id == faultId }
+
+    private val faultOption: PickOption?
+        get() = activeFault?.let { PickOption(it.id, it.name) }
 
     private val activeModel: ControllerModel?
         get() = catalog.firstOrNull { it.id == modelId }
@@ -133,9 +144,6 @@ class MainActivity : ComponentActivity() {
     private val platformOption: PickOption?
         get() = activeModel?.platforms?.firstOrNull { it.id == platformId }
             ?.let { PickOption(it.id, it.name, it.customer) }
-
-    private val activeTemplateName: String
-        get() = templates.firstOrNull { it.id == templateId }?.name ?: ""
 
     private val activeSteps: List<SopStep>
         get() = templates.firstOrNull { it.id == templateId }?.steps ?: emptyList()
@@ -161,10 +169,13 @@ class MainActivity : ComponentActivity() {
 
         templates.addAll(SopStore.loadTemplates(this))
         catalog = Catalog.load(this)
+        faults = Faults.load(this)
         settings = SettingsStore.load(this)
         SopStore.loadSession(this).let { s ->
-            workOrder = s.workOrder
             serialNo = s.serialNo
+            modelId = s.modelId
+            platformId = s.platformId
+            faultId = s.faultId
             templateId = s.templateId
             stepIndex = s.stepIndex
             shotCounts = s.shotCounts
@@ -216,21 +227,15 @@ class MainActivity : ComponentActivity() {
                         onModelTap = { sheet = Sheet.MODEL },
                         onPlatformTap = { if (activeModel != null) sheet = Sheet.PLATFORM },
                         onSettings = { screen = Screen.SETTINGS },
-                        onScanWorkOrder = {
-                            scanTarget = ScanTarget.WORK_ORDER
-                            scannedCode = null
-                            screen = Screen.SCAN
-                        },
                         onScanSerial = {
-                            scanTarget = ScanTarget.SERIAL
                             scannedCode = null
                             screen = Screen.SCAN
                         },
-                        workOrder = workOrder,
+                        faultOption = faultOption,
+                        onFaultTap = { sheet = Sheet.FAULT },
                         serialNo = serialNo,
                         templates = templates,
                         activeTemplateId = templateId,
-                        onWorkOrderChange = { workOrder = it },
                         onSerialChange = { serialNo = it },
                         templateOption = templates.firstOrNull { it.id == templateId }
                             ?.let { PickOption(it.id, it.name, "${it.steps.size} 个拍摄点位") },
@@ -277,6 +282,16 @@ class MainActivity : ComponentActivity() {
                             },
                             onDismiss = { sheet = Sheet.NONE }
                         )
+                        Sheet.FAULT -> PickerSheet(
+                            title = "故障类型",
+                            options = faults.map { PickOption(it.id, it.name) },
+                            selectedId = faultId,
+                            onPick = { opt ->
+                                faultId = opt?.id ?: ""
+                                sheet = Sheet.NONE
+                            },
+                            onDismiss = { sheet = Sheet.NONE }
+                        )
                         Sheet.TEMPLATE -> PickerSheet(
                             title = "检修流程",
                             options = templates.map {
@@ -299,7 +314,7 @@ class MainActivity : ComponentActivity() {
                 }
 
                 Screen.SCAN -> ScanScreen(
-                    title = if (scanTarget == ScanTarget.WORK_ORDER) "扫工单号" else "扫序列号",
+                    title = "扫控制器序列号",
                     hint = "把板子上的码对进框里，识别到就自动回填",
                     lastCode = scannedCode?.value,
                     bindPreview = ::bindScanner,
@@ -311,6 +326,8 @@ class MainActivity : ComponentActivity() {
 
                 Screen.SETTINGS -> SettingsScreen(
                     settings = settings,
+                    archiveReady = archiveReady,
+                    onGrantArchive = ::openArchivePermission,
                     onChange = {
                         settings = it
                         SettingsStore.save(this, it)
@@ -411,6 +428,25 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * 去系统设置开「所有文件访问权限」。
+     *
+     * 这个权限没法用普通的权限弹窗要，只能跳系统页面让用户自己开。
+     */
+    private fun openArchivePermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        runCatching {
+            startActivity(
+                Intent(
+                    Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                    Uri.parse("package:$packageName")
+                )
+            )
+        }.onFailure {
+            runCatching { startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)) }
+        }
+    }
+
     private fun requestPermissions() {
         val wanted = mutableListOf(Manifest.permission.CAMERA)
         if (settings.recordGps) {
@@ -453,7 +489,7 @@ class MainActivity : ComponentActivity() {
     private fun persist() {
         SopStore.saveSession(
             this,
-            Session(workOrder, serialNo, templateId, stepIndex, shotCounts)
+            Session(serialNo, modelId, platformId, faultId, templateId, stepIndex, shotCounts)
         )
     }
 
@@ -559,10 +595,7 @@ class MainActivity : ComponentActivity() {
         analysis.setAnalyzer(pipeline.captureExecutor, CodeAnalyzer { code ->
             lifecycleScope.launch(Dispatchers.Main) {
                 scannedCode = code
-                when (scanTarget) {
-                    ScanTarget.WORK_ORDER -> workOrder = code.value
-                    ScanTarget.SERIAL -> serialNo = code.value
-                }
+                serialNo = code.value
                 screen = Screen.SETUP
                 scannedCode = null
             }
@@ -594,10 +627,10 @@ class MainActivity : ComponentActivity() {
         val meta = ImageMeta(
             imageId = UUID.randomUUID().toString(),
             capturedAt = now,
-            workOrder = workOrder,
             serialNo = serialNo,
             modelName = activeModel?.name ?: "",
             platformName = platformOption?.label ?: "",
+            faultType = activeFault?.name ?: "",
             stepOrder = step?.order ?: 0,
             stepName = step?.name ?: "",
             stepRefDes = step?.refDes ?: "",
@@ -615,12 +648,15 @@ class MainActivity : ComponentActivity() {
         // 到那时 watermarkHeadline() 读到的是下一步，水印就比实际步骤快一格。
         val shotContent = WatermarkContent(watermarkHeadline(), watermarkLines(now))
         val shotAnchor = anchor
-        val shotName = FileNaming.build(step, taken + 1, now, activeTemplateName)
-        val shotPath = FileNaming.relativePath(workOrder, serialNo, now)
+        val shotName = FileNaming.build(step, taken + 1, now)
+        val shotPath = FileNaming.relativePath(serialNo, now)
         val shotBurn = settings.burnsAnything
         val shotKeepRaw = settings.keepOriginal
 
         feedback.fire(settings.shutterVibrate, settings.shutterSound)
+        Archive.touchProject(
+            serialNo, activeModel?.name ?: "", platformOption?.label ?: "", activeFault?.name ?: ""
+        )
 
         queueDepth += 1
         imageCapture.shoot(pipeline) { bytes ->
@@ -633,6 +669,8 @@ class MainActivity : ComponentActivity() {
                 meta = meta,
                 burnWatermark = shotBurn,
                 keepOriginal = shotKeepRaw,
+                headline = shotContent.headline,
+                lines = shotContent.lines,
             )
         }
 
@@ -649,6 +687,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        // 从系统设置页回来时刷新一下，用户可能刚把权限打开
+        archiveReady = Archive.canWrite()
         orientation.enable()
     }
 

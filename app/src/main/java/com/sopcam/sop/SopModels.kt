@@ -65,16 +65,20 @@ data class SopTemplate(
 
 /** 当前这一单的现场状态。退出重进要能接着拍，所以也落盘。 */
 data class Session(
-    val workOrder: String = "",
     val serialNo: String = "",
+    val modelId: String = "",
+    val platformId: String = "",
+    val faultId: String = "",
     val templateId: String = "",
     val stepIndex: Int = 0,
     /** key 是步骤 order，value 是已拍张数 */
     val shotCounts: Map<Int, Int> = emptyMap(),
 ) {
     fun toJson(): JSONObject = JSONObject()
-        .put("workOrder", workOrder)
         .put("serialNo", serialNo)
+        .put("modelId", modelId)
+        .put("platformId", platformId)
+        .put("faultId", faultId)
         .put("templateId", templateId)
         .put("stepIndex", stepIndex)
         .put("shotCounts", JSONObject().apply {
@@ -87,8 +91,10 @@ data class Session(
             val map = mutableMapOf<Int, Int>()
             counts.keys().forEach { k -> map[k.toInt()] = counts.optInt(k) }
             return Session(
-                workOrder = o.optString("workOrder"),
                 serialNo = o.optString("serialNo"),
+                modelId = o.optString("modelId"),
+                platformId = o.optString("platformId"),
+                faultId = o.optString("faultId"),
                 templateId = o.optString("templateId"),
                 stepIndex = o.optInt("stepIndex", 0),
                 shotCounts = map,
@@ -181,22 +187,14 @@ object FileNaming {
 
     /**
      * 成片文件名。
-     *   控制器检修_03_低压发波_143052
+     *   03_低压发波_143052
      *   03_Q1200-5脚_水泵输出电压_143052
      *   07_上桥管压降_2_143052        ← 同一步骤第 2 张
      *   FREE_143052                   ← 未选模板时的自由拍摄
      *
      * 两位序号前缀是刻意的：电脑上按文件名排序 = 按 SOP 顺序，不用再看时间戳。
      */
-    fun build(
-        step: SopStep?,
-        shotIndex: Int = 1,
-        at: Long = System.currentTimeMillis(),
-        templateName: String = "",
-    ): String {
-        // 流程名放最前面：同一工单下拍了两个流程时能自然分组，
-        // 组内仍按步骤号排序，不影响"文件名排序 = SOP 顺序"这个性质
-        val prefix = if (templateName.isBlank()) "" else sanitize(templateName, 20) + "_"
+    fun build(step: SopStep?, shotIndex: Int = 1, at: Long = System.currentTimeMillis()): String {
         val head = step?.let {
             val idx = it.order.toString().padStart(2, '0')
             val body = if (it.refDes.isBlank()) sanitize(it.name, 44)
@@ -204,22 +202,17 @@ object FileNaming {
             "${idx}_$body"
         } ?: "FREE"
         val dup = if (shotIndex > 1) "_$shotIndex" else ""
-        return "$prefix$head$dup" + "_" + timeFmt.format(Date(at))
+        return "$head$dup" + "_" + timeFmt.format(Date(at))
     }
 
     /**
      * 归档目录。电脑端整个 SopCam 拖过去，层级就是天然分类：
-     *   DCIM/SopCam/20260809/GZJ20260728025832_0104215HZN92952565/
-     * 工单号为空时退到按日期存，不至于丢照片。
+     *   DCIM/SopCam/20260809/0104215HZN92952565/
+     * 序列号是唯一的，所以单独用它做目录名就够，不会撞。
+     * 序列号为空时退到按日期存，不至于丢照片。
      */
-    fun relativePath(
-        workOrder: String,
-        serialNo: String,
-        at: Long = System.currentTimeMillis(),
-    ): String {
-        val folder = listOf(workOrder, serialNo)
-            .filter { it.isNotBlank() }
-            .joinToString("_") { sanitize(it, 24) }
+    fun relativePath(serialNo: String, at: Long = System.currentTimeMillis()): String {
+        val folder = if (serialNo.isBlank()) "" else sanitize(serialNo, 32)
         val day = dayFmt.format(Date(at))
         return if (folder.isBlank()) "DCIM/SopCam/$day" else "DCIM/SopCam/$day/$folder"
     }

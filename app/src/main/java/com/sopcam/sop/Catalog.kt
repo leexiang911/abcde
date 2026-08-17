@@ -49,6 +49,46 @@ data class ControllerModel(
     }
 }
 
+/** 故障类型：4S 店报修时的描述，SOP 三维键的第三维 */
+data class FaultType(val id: String, val name: String) {
+    fun toJson(): JSONObject = JSONObject().put("id", id).put("name", name)
+
+    companion object {
+        fun from(o: JSONObject) = FaultType(o.optString("id"), o.optString("name"))
+    }
+}
+
+object Faults {
+    private val seed = listOf(
+        FaultType("comm", "通讯故障"),
+        FaultType("fan", "风扇常转"),
+        FaultType("igbt", "IGBT/NTC 故障"),
+        FaultType("nostart", "无法上电"),
+        FaultType("water", "水泵异常"),
+        FaultType("other", "其他"),
+    )
+
+    private fun file(ctx: Context) = File(ctx.filesDir, "faults.json")
+
+    fun load(ctx: Context): List<FaultType> {
+        val f = file(ctx)
+        if (!f.exists()) {
+            save(ctx, seed)
+            return seed
+        }
+        return runCatching {
+            val arr = JSONArray(f.readText())
+            (0 until arr.length()).map { FaultType.from(arr.getJSONObject(it)) }
+        }.getOrDefault(seed)
+    }
+
+    fun save(ctx: Context, list: List<FaultType>) {
+        runCatching {
+            file(ctx).writeText(JSONArray().apply { list.forEach { put(it.toJson()) } }.toString())
+        }
+    }
+}
+
 object Catalog {
 
     /** 写死的测试数据，首次启动时落盘，之后可被下载的目录覆盖 */

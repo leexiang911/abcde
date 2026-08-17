@@ -11,17 +11,17 @@ import java.util.Locale
  *
  * 拆成两处落地：
  *   · 标准字段（时间 / GPS / 机型）走 EXIF —— Windows 属性面板、看图软件都认
- *   · 业务字段（工单 / 型号 / 步骤）走 XMP —— 自定义命名空间，exiftool 一条命令批量导表
+ *   · 业务字段（序列号 / 型号 / 故障 / 步骤）走 XMP —— 自定义命名空间，exiftool 一条命令批量导表
  *
  * 原图和水印图写的是同一份，所以以后拿原图重烧水印，信息一个不缺。
  */
 data class ImageMeta(
     val imageId: String,
     val capturedAt: Long,
-    val workOrder: String = "",
     val serialNo: String = "",
     val modelName: String = "",
     val platformName: String = "",
+    val faultType: String = "",
     val stepOrder: Int = 0,
     val stepName: String = "",
     val stepRefDes: String = "",
@@ -57,10 +57,10 @@ object Xmp {
             add("sopcam:CapturedAt" to isoFmt.format(Date(meta.capturedAt)))
             add("sopcam:HasWatermark" to meta.hasWatermark.toString())
             add("sopcam:Device" to "${meta.deviceMake} ${meta.deviceModel} / ${meta.androidRelease}")
-            if (meta.workOrder.isNotBlank()) add("sopcam:WorkOrder" to meta.workOrder)
             if (meta.serialNo.isNotBlank()) add("sopcam:SerialNo" to meta.serialNo)
             if (meta.modelName.isNotBlank()) add("sopcam:ControllerModel" to meta.modelName)
             if (meta.platformName.isNotBlank()) add("sopcam:Platform" to meta.platformName)
+            if (meta.faultType.isNotBlank()) add("sopcam:FaultType" to meta.faultType)
             if (meta.stepOrder > 0) {
                 add("sopcam:StepOrder" to meta.stepOrder.toString())
                 add("sopcam:StepName" to meta.stepName)

@@ -52,7 +52,7 @@ val Steel = Color(0xFF8C949E)
 val Done = Color(0xFF4CC38A)
 
 /* ==================================================================
- * 开工页：填工单、选模板
+ * 开工页：填控制器信息、选流程
  * ================================================================== */
 
 @Composable
@@ -63,13 +63,12 @@ fun SetupScreen(
     onModelTap: () -> Unit,
     onPlatformTap: () -> Unit,
     onSettings: () -> Unit,
-    onScanWorkOrder: () -> Unit,
     onScanSerial: () -> Unit,
-    workOrder: String,
+    faultOption: PickOption?,
+    onFaultTap: () -> Unit,
     serialNo: String,
     templates: List<SopTemplate>,
     activeTemplateId: String,
-    onWorkOrderChange: (String) -> Unit,
     onSerialChange: (String) -> Unit,
     templateOption: PickOption?,
     activeTemplate: SopTemplate?,
@@ -97,13 +96,11 @@ fun SetupScreen(
         }
         Spacer(Modifier.height(4.dp))
         Text(
-            "照片将自动绑定工单信息",
+            "照片自动绑定控制器信息，原图另存归档区",
             color = Steel, fontSize = 13.sp
         )
 
         Spacer(Modifier.height(24.dp))
-        Field("工单号", workOrder, "GZJ20260728025832", onWorkOrderChange, onScanWorkOrder)
-        Spacer(Modifier.height(14.dp))
         Field("控制器序列号", serialNo, "0104215HZN92952565", onSerialChange, onScanSerial)
 
         Spacer(Modifier.height(14.dp))
@@ -113,6 +110,14 @@ fun SetupScreen(
             hint = "请选择控制器型号",
             modifier = Modifier.fillMaxWidth(),
             onTap = onModelTap
+        )
+        Spacer(Modifier.height(14.dp))
+        PickerField(
+            label = "故障类型",
+            selected = faultOption,
+            hint = "4S 店描述的故障",
+            modifier = Modifier.fillMaxWidth(),
+            onTap = onFaultTap
         )
         Spacer(Modifier.height(14.dp))
         PickerField(
