@@ -68,8 +68,12 @@ fun readShots(serialNo: String): List<ShotItem> = Archive.shots(serialNo).map { 
 fun ProjectDetailScreen(
     project: Archive.Project,
     shots: List<ShotItem>,
+    busy: String?,
+    onSetStatus: (Archive.Status) -> Unit,
+    onRestoreOne: (ShotItem) -> Unit,
+    onRestoreAll: () -> Unit,
     onDeleteShot: (ShotItem) -> Unit,
-    onDeleteProject: (Boolean) -> Unit,
+    onDeleteProject: (DeleteScope) -> Unit,
     onBack: () -> Unit,
 ) {
     var viewing by remember { mutableStateOf<ShotItem?>(null) }
@@ -119,6 +123,24 @@ fun ProjectDetailScreen(
 
             Spacer(Modifier.height(14.dp))
 
+            StatusPicker(project.status, onSetStatus)
+
+            Spacer(Modifier.height(12.dp))
+
+            if (busy != null) {
+                Text(
+                    busy,
+                    color = Amber,
+                    fontSize = 13.sp,
+                    modifier = Modifier
+                        .padding(horizontal = 20.dp)
+                        .fillMaxWidth()
+                        .background(Panel, RoundedCornerShape(8.dp))
+                        .padding(12.dp)
+                )
+                Spacer(Modifier.height(12.dp))
+            }
+
             if (shots.isEmpty()) {
                 Text(
                     "这个项目里没有原图。可能是拍摄时没开「同时保存无水印原图」。",
@@ -145,13 +167,32 @@ fun ProjectDetailScreen(
                 }
             }
 
+            if (shots.isNotEmpty()) {
+                Text(
+                    "把这 ${shots.size} 张全部重烧回相册",
+                    color = Ink,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .padding(horizontal = 20.dp)
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Amber)
+                        .clickable(enabled = busy == null, onClick = onRestoreAll)
+                        .padding(vertical = 14.dp),
+                    textAlign = TextAlign.Center
+                )
+                Spacer(Modifier.height(10.dp))
+            }
+
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .padding(20.dp)
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 20.dp)
             ) {
                 Text(
-                    "删除整个项目",
+                    "删除…",
                     color = Color(0xFFE86A5C),
                     fontSize = 14.sp,
                     modifier = Modifier
@@ -168,6 +209,10 @@ fun ProjectDetailScreen(
         viewing?.let { item ->
             ShotViewer(
                 item = item,
+                onRestore = {
+                    onRestoreOne(item)
+                    viewing = null
+                },
                 onDelete = {
                     onDeleteShot(item)
                     viewing = null
@@ -181,9 +226,9 @@ fun ProjectDetailScreen(
                 serialNo = project.serialNo,
                 shotCount = shots.size,
                 onCancel = { confirming = false },
-                onConfirm = { alsoGallery ->
+                onConfirm = { scope ->
                     confirming = false
-                    onDeleteProject(alsoGallery)
+                    onDeleteProject(scope)
                 }
             )
         }
@@ -246,7 +291,12 @@ private fun ThumbCell(item: ShotItem, onTap: () -> Unit) {
 }
 
 @Composable
-private fun ShotViewer(item: ShotItem, onDelete: () -> Unit, onClose: () -> Unit) {
+private fun ShotViewer(
+    item: ShotItem,
+    onRestore: () -> Unit,
+    onDelete: () -> Unit,
+    onClose: () -> Unit,
+) {
     var bmp by remember(item.file.absolutePath) { mutableStateOf<Bitmap?>(null) }
     var confirming by remember { mutableStateOf(false) }
 
@@ -320,6 +370,17 @@ private fun ShotViewer(item: ShotItem, onDelete: () -> Unit, onClose: () -> Unit
                 )
             } else {
                 Text(
+                    "重烧回相册",
+                    color = Ink,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Amber)
+                        .clickable(onClick = onRestore)
+                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                )
+                Text(
                     "删除这张",
                     color = Color(0xFFE86A5C),
                     fontSize = 14.sp,
@@ -344,11 +405,15 @@ private fun ShotViewer(item: ShotItem, onDelete: () -> Unit, onClose: () -> Unit
     }
 }
 
+/** 删哪一份 */
+enum class DeleteScope { GALLERY_ONLY, ARCHIVE_ONLY, BOTH }
+
 /**
  * 删除确认。
  *
- * 归档和相册是两份独立的数据，后果不一样，所以分成两个按钮而不是一个"删除"：
- * 只删归档 = 成片还在，只是以后不能重烧水印了；
+ * 归档和相册是两份独立的数据，后果完全不同，所以分三个按钮而不是一个"删除"：
+ * 只删相册 = 成片没了但随时能重烧回来，最安全；
+ * 只删归档 = 成片还在，但从此失去重烧能力；
  * 一起删   = 这个控制器的留档彻底没了。
  */
 @Composable
@@ -356,7 +421,7 @@ private fun DeleteProjectDialog(
     serialNo: String,
     shotCount: Int,
     onCancel: () -> Unit,
-    onConfirm: (Boolean) -> Unit,
+    onConfirm: (DeleteScope) -> Unit,
 ) {
     Box(
         Modifier
@@ -373,7 +438,7 @@ private fun DeleteProjectDialog(
                 .clickable(enabled = false) {}
                 .padding(20.dp)
         ) {
-            Text("删除项目", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text("删除", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))
             Text(
                 serialNo,
@@ -383,46 +448,34 @@ private fun DeleteProjectDialog(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(Modifier.height(16.dp))
 
-            Text(
-                "只删归档",
-                color = Color.White,
-                fontSize = 15.sp,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0xFF262D35))
-                    .clickable { onConfirm(false) }
-                    .padding(14.dp)
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "删掉 $shotCount 张原图，相册里的水印照片保留。删了就不能再重烧水印。",
-                color = Steel,
-                fontSize = 11.sp,
-                lineHeight = 17.sp
-            )
+            Spacer(Modifier.height(18.dp))
 
-            Spacer(Modifier.height(14.dp))
+            ScopeOption(
+                title = "只删相册照片",
+                desc = "留着 $shotCount 张原图，随时能重烧回来。相册腾干净了但档案还在。",
+                tint = Color.White,
+                bg = Color(0xFF262D35)
+            ) { onConfirm(DeleteScope.GALLERY_ONLY) }
 
-            Text(
-                "归档和相册一起删",
-                color = Color.White,
-                fontSize = 15.sp,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0xFFE86A5C))
-                    .clickable { onConfirm(true) }
-                    .padding(14.dp)
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "这个控制器的留档全部清空，不可恢复。",
-                color = Color(0xFFE86A5C),
-                fontSize = 11.sp
-            )
+            Spacer(Modifier.height(12.dp))
+
+            ScopeOption(
+                title = "只删归档原图",
+                desc = "相册里的成片保留，但从此不能再重烧水印。",
+                tint = Color.White,
+                bg = Color(0xFF262D35)
+            ) { onConfirm(DeleteScope.ARCHIVE_ONLY) }
+
+            Spacer(Modifier.height(12.dp))
+
+            ScopeOption(
+                title = "两份都删",
+                desc = "这个控制器的留档全部清空，不可恢复。",
+                tint = Ink,
+                bg = Color(0xFFE86A5C),
+                descTint = Color(0xFFE86A5C)
+            ) { onConfirm(DeleteScope.BOTH) }
 
             Spacer(Modifier.height(18.dp))
             Text(
@@ -435,6 +488,62 @@ private fun DeleteProjectDialog(
                     .padding(vertical = 10.dp),
                 textAlign = TextAlign.Center
             )
+        }
+    }
+}
+
+@Composable
+private fun ScopeOption(
+    title: String,
+    desc: String,
+    tint: Color,
+    bg: Color,
+    descTint: Color = Steel,
+    onClick: () -> Unit,
+) {
+    Text(
+        title,
+        color = tint,
+        fontSize = 15.sp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(bg)
+            .clickable(onClick = onClick)
+            .padding(14.dp)
+    )
+    Spacer(Modifier.height(4.dp))
+    Text(desc, color = descTint, fontSize = 11.sp, lineHeight = 17.sp)
+}
+
+/** 状态标记：三个颜色块，点一下切换。再点一次取消标记 */
+@Composable
+private fun StatusPicker(current: Archive.Status, onPick: (Archive.Status) -> Unit) {
+    Row(
+        Modifier.padding(horizontal = 20.dp).fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Archive.Status.entries.filter { it != Archive.Status.NONE }.forEach { st ->
+            val on = current == st
+            val tint = statusColor(st)
+            Row(
+                Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (on) tint else Panel)
+                    .border(1.dp, if (on) tint else Color(0xFF232A31), RoundedCornerShape(8.dp))
+                    .clickable { onPick(if (on) Archive.Status.NONE else st) }
+                    .padding(vertical = 11.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    st.label,
+                    color = if (on) Ink else Steel,
+                    fontSize = 13.sp,
+                    fontWeight = if (on) FontWeight.Bold else FontWeight.Normal
+                )
+            }
         }
     }
 }

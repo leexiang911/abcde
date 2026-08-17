@@ -61,40 +61,62 @@ object Archive {
      * ------------------------------------------------------------------ */
 
     /**
-     * 存一张原图和它的随行元数据。
-     * 返回落盘的基名（不含扩展名），失败返回 null。
+     * 归档写入的结果。
+     *
+     * 以前这里返回 String? 并且整个包在 runCatching 里，写失败悄无声息 ——
+     * 用户开着"保存原图"拍了一整天，回头才发现项目页是空的。
+     * 现在把失败的原因带出来，让界面能当场报警。
      */
+    sealed interface SaveResult {
+        data class Ok(val base: String) : SaveResult
+        /** 没拿到"所有文件访问权限" */
+        data object NoPermission : SaveResult
+        data class Failed(val reason: String) : SaveResult
+    }
+
+    /** 存一张原图和它的随行元数据 */
     fun save(
         serialNo: String,
         jpeg: ByteArray,
         meta: ImageMeta,
         watermarkLines: List<String>,
         headline: String?,
-    ): String? = runCatching {
-        if (!canWrite()) return null
-        ensureRoot()
-        val dir = projectDir(serialNo)
-        if (!dir.exists()) dir.mkdirs()
+        fileName: String = "",
+        relativePath: String = "",
+    ): SaveResult {
+        if (!canWrite()) return SaveResult.NoPermission
+        return runCatching {
+            ensureRoot()
+            val dir = projectDir(serialNo)
+            if (!dir.exists()) dir.mkdirs()
 
-        val base = uniqueBase(dir, fileFmt.format(Date(meta.capturedAt)))
-        File(dir, "$base.$RAW_EXT").writeBytes(jpeg)
+            val base = uniqueBase(dir, fileFmt.format(Date(meta.capturedAt)))
+            File(dir, "$base.$RAW_EXT").writeBytes(jpeg)
 
-        // 把当时的水印内容也记下来，恢复时才能烧出一模一样的图
-        val side = JSONObject()
-            .put("imageId", meta.imageId)
-            .put("capturedAt", meta.capturedAt)
-            .put("stepOrder", meta.stepOrder)
-            .put("stepName", meta.stepName)
-            .put("stepRefDes", meta.stepRefDes)
-            .put("codeValue", meta.codeValue)
-            .put("codeFormat", meta.codeFormat)
-            .put("anchor", meta.anchor)
-            .put("topEdge", meta.topEdge)
-            .put("headline", headline ?: "")
-            .put("lines", JSONArray().apply { watermarkLines.forEach { put(it) } })
-        File(dir, "$base.json").writeText(side.toString())
-        base
-    }.getOrNull()
+            // 把当时的水印内容也记下来，恢复时才能烧出一模一样的图
+            val side = JSONObject()
+                .put("imageId", meta.imageId)
+                .put("capturedAt", meta.capturedAt)
+                .put("serialNo", meta.serialNo)
+                .put("modelName", meta.modelName)
+                .put("platformName", meta.platformName)
+                .put("faultType", meta.faultType)
+                .put("stepOrder", meta.stepOrder)
+                .put("stepName", meta.stepName)
+                .put("stepRefDes", meta.stepRefDes)
+                .put("codeValue", meta.codeValue)
+                .put("codeFormat", meta.codeFormat)
+                .put("anchor", meta.anchor)
+                .put("topEdge", meta.topEdge)
+                .put("headline", headline ?: "")
+                .put("lines", JSONArray().apply { watermarkLines.forEach { put(it) } })
+                // 这两个是恢复水印时要用的：往哪个相册目录写、叫什么名字
+                .put("fileName", fileName)
+                .put("relativePath", relativePath)
+            File(dir, "$base.json").writeText(side.toString())
+            SaveResult.Ok(base) as SaveResult
+        }.getOrElse { SaveResult.Failed(it.message ?: it.javaClass.simpleName) }
+    }
 
     /** 同一秒内连拍会撞名，加序号错开 */
     private fun uniqueBase(dir: File, stamp: String): String {
@@ -116,12 +138,17 @@ object Archive {
             val created = if (f.exists()) {
                 runCatching { JSONObject(f.readText()).optLong("createdAt", now) }.getOrDefault(now)
             } else now
+            // 状态是用户手动标的，拍照刷新档案时不能把它冲掉
+            val status = if (f.exists()) {
+                runCatching { JSONObject(f.readText()).optString("status") }.getOrDefault("")
+            } else ""
             f.writeText(
                 JSONObject()
                     .put("serialNo", serialNo)
                     .put("model", model)
                     .put("platform", platform)
                     .put("fault", fault)
+                    .put("status", status)
                     .put("createdAt", created)
                     .put("updatedAt", now)
                     .toString()
@@ -133,6 +160,19 @@ object Archive {
      * 读取
      * ------------------------------------------------------------------ */
 
+    /** 项目进度。检修台上一眼要能扫出哪些还没弄完、哪些出了问题 */
+    enum class Status(val key: String, val label: String) {
+        NONE("", "未标记"),
+        DOING("doing", "进行中"),
+        DONE("done", "完成"),
+        ERROR("error", "异常");
+
+        companion object {
+            fun of(key: String?): Status =
+                entries.firstOrNull { it.key == key } ?: NONE
+        }
+    }
+
     data class Project(
         val serialNo: String,
         val model: String,
@@ -140,7 +180,20 @@ object Archive {
         val fault: String,
         val updatedAt: Long,
         val shotCount: Int,
-    )
+        val status: Status = Status.NONE,
+    ) {
+        /** 搜索时拿来匹配的文本 */
+        fun haystack(): String = "$serialNo $model $platform $fault".lowercase()
+    }
+
+    fun setStatus(serialNo: String, status: Status) {
+        runCatching {
+            val f = File(projectDir(serialNo), "project.json")
+            val o = if (f.exists()) JSONObject(f.readText()) else JSONObject()
+            f.parentFile?.mkdirs()
+            f.writeText(o.put("status", status.key).put("updatedAt", System.currentTimeMillis()).toString())
+        }
+    }
 
     /** 所有项目，最近更新的排前面 */
     fun list(): List<Project> = runCatching {
@@ -163,6 +216,7 @@ object Archive {
                     fault = o.optString("fault"),
                     updatedAt = o.optLong("updatedAt", dir.lastModified()),
                     shotCount = shots,
+                    status = Status.of(o.optString("status")),
                 )
             }
             ?.sortedByDescending { it.updatedAt }

@@ -84,6 +84,7 @@ fun CameraScreen(
     watermarkLines: List<String>,
     queueDepth: Int,
     lastSaved: String?,
+    archiveWarning: String?,
     onStepSelect: (Int) -> Unit,
     onPanelChange: (OverlayPanel) -> Unit,
     onAnchorPick: (Anchor) -> Unit,
@@ -211,6 +212,23 @@ fun CameraScreen(
                     ZoomBar(zoomRatio, minZoom, maxZoom, onZoomPick)
                 }
             }
+            }
+
+            // 归档警告排在最前，而且不会自己消失 ——
+            // 原图没存是"拍了等于白拍"级别的问题，比存盘提示重要得多
+            archiveWarning?.let {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "⚠ $it",
+                    color = Color(0xFFE86A5C),
+                    fontSize = 12.sp,
+                    lineHeight = 18.sp,
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp)
+                        .fillMaxWidth()
+                        .background(Color(0x33E86A5C), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 10.dp, vertical = 8.dp)
+                )
             }
 
             scannedCode?.let {

@@ -1,5 +1,12 @@
 package com.sopcam.ui
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -39,16 +46,30 @@ private val dayFmt = SimpleDateFormat("MM-dd HH:mm", Locale.CHINA)
 
 @Composable
 fun ProjectsScreen(
-    projects: List<Archive.Project>,
+    all: List<Archive.Project>,
     selected: Set<String>,
     exporting: String?,
     onToggle: (String) -> Unit,
     onOpen: (Archive.Project) -> Unit,
-    onSelectAll: () -> Unit,
+    query: String,
+    onQuery: (String) -> Unit,
+    onScanSearch: () -> Unit,
+    statusFilter: Archive.Status?,
+    onStatusFilter: (Archive.Status?) -> Unit,
+    onSelectAll: (List<String>) -> Unit,
     onExport: (Exporter.Options) -> Unit,
     onBack: () -> Unit,
 ) {
     val sheetOpen = selected.isNotEmpty()
+
+    // 搜索和状态筛选叠加。扫码搜索本质上就是把码填进搜索框，不用另做一套
+    val shown = remember(all, query, statusFilter) {
+        val q = query.trim().lowercase()
+        all.filter { p ->
+            (statusFilter == null || p.status == statusFilter) &&
+                (q.isBlank() || p.haystack().contains(q))
+        }
+    }
 
     Box(Modifier.fillMaxSize().background(Ink)) {
         Column(Modifier.fillMaxSize()) {
@@ -63,20 +84,23 @@ fun ProjectsScreen(
                     Text("检修项目", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(3.dp))
                     Text(
-                        if (selected.isEmpty()) "${projects.size} 个项目"
-                        else "已选 ${selected.size} 个",
+                        when {
+                            selected.isNotEmpty() -> "已选 ${selected.size} 个"
+                            shown.size != all.size -> "筛出 ${shown.size} / ${all.size} 个"
+                            else -> "${all.size} 个项目"
+                        },
                         color = if (selected.isEmpty()) Steel else Amber,
                         fontSize = 13.sp
                     )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (projects.isNotEmpty()) {
+                    if (shown.isNotEmpty()) {
                         Text(
-                            if (selected.size == projects.size) "取消全选" else "全选",
+                            if (selected.size == shown.size) "取消全选" else "全选",
                             color = Steel,
                             fontSize = 13.sp,
                             modifier = Modifier
-                                .clickable(onClick = onSelectAll)
+                                .clickable { onSelectAll(shown.map { it.serialNo }) }
                                 .padding(10.dp)
                         )
                     }
@@ -95,9 +119,19 @@ fun ProjectsScreen(
 
             Spacer(Modifier.height(14.dp))
 
-            if (projects.isEmpty()) {
+            SearchRow(query, onQuery, onScanSearch)
+
+            Spacer(Modifier.height(10.dp))
+
+            StatBar(all, statusFilter, onStatusFilter)
+
+            Spacer(Modifier.height(12.dp))
+
+            if (shown.isEmpty()) {
                 Text(
-                    "还没有归档。拍照时如果开着「同时保存无水印原图」，每个控制器会自动建一个项目。",
+                    if (all.isEmpty())
+                        "还没有归档。拍照时如果开着「同时保存无水印原图」，每个控制器会自动建一个项目。"
+                    else "没有匹配的项目，换个关键词或者取消筛选试试。",
                     color = Steel,
                     fontSize = 14.sp,
                     lineHeight = 21.sp,
@@ -109,7 +143,7 @@ fun ProjectsScreen(
                 )
             } else {
                 LazyColumn(Modifier.weight(1f).padding(horizontal = 20.dp)) {
-                    items(projects, key = { it.serialNo }) { p ->
+                    items(shown, key = { it.serialNo }) { p ->
                         ProjectRow(
                             p = p,
                             checked = p.serialNo in selected,
@@ -170,6 +204,16 @@ private fun ProjectRow(
 
         Spacer(Modifier.width(12.dp))
 
+
+        if (p.status != Archive.Status.NONE) {
+            Box(
+                Modifier
+                    .size(8.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(statusColor(p.status))
+            )
+            Spacer(Modifier.width(8.dp))
+        }
 
         Column(Modifier.weight(1f)) {
             Text(
@@ -301,6 +345,146 @@ private fun ExportButton(
                 else -> Steel
             },
             fontSize = 12.sp
+        )
+    }
+}
+
+fun statusColor(s: Archive.Status): Color = when (s) {
+    Archive.Status.DONE -> Done
+    Archive.Status.ERROR -> Color(0xFFE86A5C)
+    Archive.Status.DOING -> Amber
+    Archive.Status.NONE -> Steel
+}
+
+@Composable
+private fun SearchRow(query: String, onQuery: (String) -> Unit, onScan: () -> Unit) {
+    Row(
+        Modifier
+            .padding(horizontal = 20.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(Panel)
+            .padding(start = 14.dp, end = 6.dp, top = 12.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.weight(1f)) {
+            if (query.isEmpty()) {
+                Text("搜序列号、型号、平台、故障", color = Color(0xFF4A525C), fontSize = 14.sp)
+            }
+            BasicTextField(
+                value = query,
+                onValueChange = onQuery,
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                textStyle = TextStyle(color = Color.White, fontSize = 14.sp),
+                cursorBrush = SolidColor(Amber)
+            )
+        }
+        if (query.isNotEmpty()) {
+            Text(
+                "×",
+                color = Steel,
+                fontSize = 17.sp,
+                modifier = Modifier.clickable { onQuery("") }.padding(horizontal = 8.dp)
+            )
+        }
+        Box(
+            Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .clickable(onClick = onScan)
+                .padding(8.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            ScanIcon()
+        }
+    }
+}
+
+/** 统计条。每个格子既是数字也是筛选按钮 —— 想看哪一类点一下就过滤 */
+@Composable
+private fun StatBar(
+    all: List<Archive.Project>,
+    active: Archive.Status?,
+    onPick: (Archive.Status?) -> Unit,
+) {
+    val counts = remember(all) {
+        mapOf(
+            Archive.Status.DOING to all.count { it.status == Archive.Status.DOING },
+            Archive.Status.DONE to all.count { it.status == Archive.Status.DONE },
+            Archive.Status.ERROR to all.count { it.status == Archive.Status.ERROR },
+        )
+    }
+
+    Row(
+        Modifier.padding(horizontal = 20.dp).fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        StatCell("全部", all.size, Steel, active == null, Modifier.weight(1f)) { onPick(null) }
+        Archive.Status.entries.filter { it != Archive.Status.NONE }.forEach { st ->
+            StatCell(
+                st.label,
+                counts[st] ?: 0,
+                statusColor(st),
+                active == st,
+                Modifier.weight(1f)
+            ) { onPick(if (active == st) null else st) }
+        }
+    }
+}
+
+@Composable
+private fun StatCell(
+    label: String,
+    count: Int,
+    tint: Color,
+    active: Boolean,
+    modifier: Modifier,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (active) Color(0xFF262D35) else Panel)
+            .border(
+                1.dp,
+                if (active) tint else Color(0xFF232A31),
+                RoundedCornerShape(8.dp)
+            )
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(count.toString(), color = tint, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(2.dp))
+        Text(label, color = Steel, fontSize = 10.sp, maxLines = 1)
+    }
+}
+
+/** 跟开工页输入框里那个同款，四角取景框加一道扫描线 */
+@Composable
+private fun ScanIcon(size: Dp = 20.dp, tint: Color = Amber) {
+    Canvas(Modifier.size(size)) {
+        val w = 2.dp.toPx()
+        val arm = this.size.minDimension * 0.3f
+        val pad = w / 2f
+        val r = this.size.width - pad
+        val b = this.size.height - pad
+        listOf(
+            Offset(pad, pad + arm) to Offset(pad, pad),
+            Offset(pad, pad) to Offset(pad + arm, pad),
+            Offset(r - arm, pad) to Offset(r, pad),
+            Offset(r, pad) to Offset(r, pad + arm),
+            Offset(r, b - arm) to Offset(r, b),
+            Offset(r, b) to Offset(r - arm, b),
+            Offset(pad + arm, b) to Offset(pad, b),
+            Offset(pad, b) to Offset(pad, b - arm),
+        ).forEach { (a, c) -> drawLine(tint, a, c, strokeWidth = w, cap = StrokeCap.Round) }
+        drawLine(
+            tint,
+            Offset(pad + arm * 0.2f, this.size.height / 2f),
+            Offset(r - arm * 0.2f, this.size.height / 2f),
+            strokeWidth = w,
+            cap = StrokeCap.Round
         )
     }
 }

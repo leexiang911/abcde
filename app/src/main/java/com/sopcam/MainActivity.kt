@@ -29,6 +29,7 @@ import com.sopcam.capture.CameraBinder
 import com.sopcam.archive.Archive
 import com.sopcam.archive.Exporter
 import com.sopcam.archive.Purge
+import com.sopcam.archive.Restorer
 import com.sopcam.archive.Thumbs
 import com.sopcam.crash.CrashLogger
 import com.sopcam.capture.CapturePipeline
@@ -53,6 +54,7 @@ import com.sopcam.sop.SopTemplate
 import androidx.camera.core.Camera
 import androidx.camera.core.ImageAnalysis
 import com.sopcam.ui.CameraScreen
+import com.sopcam.ui.DeleteScope
 import com.sopcam.ui.ProjectDetailScreen
 import com.sopcam.ui.ProjectsScreen
 import com.sopcam.ui.ShotItem
@@ -127,11 +129,16 @@ class MainActivity : ComponentActivity() {
     private var focusNote by mutableStateOf<String?>(null)
     private var afSupported by mutableStateOf(false)
     private var archiveReady by mutableStateOf(false)
+    private var archiveWarning by mutableStateOf<String?>(null)
     private var projects by mutableStateOf<List<Archive.Project>>(emptyList())
     private var picked by mutableStateOf<Set<String>>(emptySet())
     private var exporting by mutableStateOf<String?>(null)
     private var openProject by mutableStateOf<Archive.Project?>(null)
     private var openShots by mutableStateOf<List<ShotItem>>(emptyList())
+    private var projectQuery by mutableStateOf("")
+    private var statusFilter by mutableStateOf<Archive.Status?>(null)
+    private var detailBusy by mutableStateOf<String?>(null)
+    private var scanForSearch = false
     private lateinit var analysis: ImageAnalysis
     private var scannedCode by mutableStateOf<ScannedCode?>(null)
     private var faults by mutableStateOf<List<FaultType>>(emptyList())
@@ -201,6 +208,9 @@ class MainActivity : ComponentActivity() {
                     lastSaved = saved.displayName
                 }
             },
+            onArchiveIssue = { msg ->
+                lifecycleScope.launch(Dispatchers.Main) { archiveWarning = msg }
+            },
             onError = { err ->
                 lifecycleScope.launch(Dispatchers.Main) {
                     queueDepth = (queueDepth - 1).coerceAtLeast(0)
@@ -242,6 +252,8 @@ class MainActivity : ComponentActivity() {
                         onProjects = {
                             projects = Archive.list()
                             picked = emptySet()
+                            projectQuery = ""
+                            statusFilter = null
                             screen = Screen.PROJECTS
                         },
                         onScanSerial = {
@@ -263,6 +275,7 @@ class MainActivity : ComponentActivity() {
                             stepIndex = 0
                             shotCounts = emptyMap()
                             persist()
+                            refreshArchiveWarning()
                             screen = Screen.CAMERA
                         },
                         onNewTemplate = { screen = Screen.TEMPLATE_EDIT },
@@ -273,6 +286,7 @@ class MainActivity : ComponentActivity() {
                         },
                         onStart = {
                             persist()
+                            refreshArchiveWarning()
                             screen = Screen.CAMERA
                         }
                     )
@@ -331,26 +345,35 @@ class MainActivity : ComponentActivity() {
                 }
 
                 Screen.SCAN -> ScanScreen(
-                    title = "扫控制器序列号",
+                    title = if (scanForSearch) "扫码搜索项目" else "扫控制器序列号",
                     hint = "把板子上的码对进框里，识别到就自动回填",
                     lastCode = scannedCode?.value,
                     bindPreview = ::bindScanner,
                     onCancel = {
                         scannedCode = null
-                        screen = Screen.SETUP
+                        screen = if (scanForSearch) Screen.PROJECTS else Screen.SETUP
+                        scanForSearch = false
                     }
                 )
 
                 Screen.PROJECTS -> ProjectsScreen(
-                    projects = projects,
+                    all = projects,
+                    query = projectQuery,
+                    onQuery = { projectQuery = it },
+                    onScanSearch = {
+                        scanForSearch = true
+                        scannedCode = null
+                        screen = Screen.SCAN
+                    },
+                    statusFilter = statusFilter,
+                    onStatusFilter = { statusFilter = it },
                     selected = picked,
                     exporting = exporting,
                     onToggle = { sn ->
                         picked = if (sn in picked) picked - sn else picked + sn
                     },
-                    onSelectAll = {
-                        picked = if (picked.size == projects.size) emptySet()
-                        else projects.map { it.serialNo }.toSet()
+                    onSelectAll = { visible ->
+                        picked = if (picked.size == visible.size) emptySet() else visible.toSet()
                     },
                     onOpen = { p ->
                         openProject = p
@@ -373,18 +396,60 @@ class MainActivity : ComponentActivity() {
                             Thumbs.evict(item.file)
                             openShots = readShots(p.serialNo)
                         },
-                        onDeleteProject = { alsoGallery ->
-                            Purge.archiveOf(p.serialNo)
-                            if (alsoGallery) Purge.galleryOf(this, p.serialNo)
+                        busy = detailBusy,
+                        onSetStatus = { st ->
+                            Archive.setStatus(p.serialNo, st)
+                            openProject = p.copy(status = st)
                             projects = Archive.list()
-                            picked = picked - p.serialNo
-                            openProject = null
-                            screen = Screen.PROJECTS
+                        },
+                        onRestoreOne = { item ->
+                            detailBusy = "恢复中…"
+                            lifecycleScope.launch(Dispatchers.IO) {
+                                val ok = Restorer.one(this@MainActivity, item.file)
+                                withContext(Dispatchers.Main) {
+                                    detailBusy = if (ok) "已重烧回相册" else "恢复失败"
+                                }
+                            }
+                        },
+                        onRestoreAll = {
+                            detailBusy = "准备中…"
+                            lifecycleScope.launch(Dispatchers.IO) {
+                                val ok = Restorer.project(this@MainActivity, p.serialNo) { i, n ->
+                                    lifecycleScope.launch(Dispatchers.Main) {
+                                        detailBusy = "恢复中 $i / $n"
+                                    }
+                                }
+                                withContext(Dispatchers.Main) {
+                                    detailBusy = "已恢复 $ok 张到相册"
+                                }
+                            }
+                        },
+                        onDeleteProject = { scope ->
+                            when (scope) {
+                                DeleteScope.GALLERY_ONLY -> Purge.galleryOf(this, p.serialNo)
+                                DeleteScope.ARCHIVE_ONLY -> Purge.archiveOf(p.serialNo)
+                                DeleteScope.BOTH -> {
+                                    Purge.galleryOf(this, p.serialNo)
+                                    Purge.archiveOf(p.serialNo)
+                                }
+                            }
+                            projects = Archive.list()
+                            // 只删了相册的话项目还在，留在详情页反而合理
+                            if (scope == DeleteScope.GALLERY_ONLY) {
+                                openShots = readShots(p.serialNo)
+                                detailBusy = "相册照片已删，原图还在，随时能重烧"
+                            } else {
+                                picked = picked - p.serialNo
+                                openProject = null
+                                detailBusy = null
+                                screen = Screen.PROJECTS
+                            }
                         },
                         onBack = {
                             // 可能在详情页删过图，回列表时张数要跟着变
                             projects = Archive.list()
                             openProject = null
+                            detailBusy = null
                             screen = Screen.PROJECTS
                         }
                     )
@@ -438,6 +503,7 @@ class MainActivity : ComponentActivity() {
                     watermarkLines = watermarkLines(System.currentTimeMillis()),
                     queueDepth = queueDepth,
                     lastSaved = lastSaved,
+                    archiveWarning = archiveWarning,
                     onStepSelect = { stepIndex = it },
                     onPanelChange = { panel = it },
                     onAnchorPick = {
@@ -520,6 +586,22 @@ class MainActivity : ComponentActivity() {
                     Exporter.share(this@MainActivity, zip)
                 }
             }
+        }
+    }
+
+    /**
+     * 进相机之前先探一次归档区。
+     *
+     * 权限缺失是可以提前知道的，没必要等拍完第一张才报 ——
+     * 开着"保存原图"却一张都没存下来，是这个 App 最坏的失败方式。
+     */
+    private fun refreshArchiveWarning() {
+        archiveReady = Archive.canWrite()
+        archiveWarning = when {
+            !settings.keepOriginal -> null
+            !archiveReady -> "原图不会被保存：缺少文件访问权限，去设置里开启"
+            serialNo.isBlank() -> "序列号是空的，原图会归到「未命名」项目下"
+            else -> null
         }
     }
 
@@ -685,8 +767,16 @@ class MainActivity : ComponentActivity() {
         analysis.setAnalyzer(pipeline.captureExecutor, CodeAnalyzer { code ->
             lifecycleScope.launch(Dispatchers.Main) {
                 scannedCode = code
-                serialNo = code.value
-                screen = Screen.SETUP
+                if (scanForSearch) {
+                    projectQuery = code.value
+                    statusFilter = null
+                    projects = Archive.list()
+                    screen = Screen.PROJECTS
+                    scanForSearch = false
+                } else {
+                    serialNo = code.value
+                    screen = Screen.SETUP
+                }
                 scannedCode = null
             }
         })
