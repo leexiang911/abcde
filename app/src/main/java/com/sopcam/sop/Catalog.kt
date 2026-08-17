@@ -111,6 +111,10 @@ data class AppSettings(
     val recordGps: Boolean = false,
     /** 取景时持续识别条码。不用扫码的活儿可以关掉省电 */
     val scanInViewfinder: Boolean = true,
+    /** 快门震动反馈 */
+    val shutterVibrate: Boolean = true,
+    /** 快门提示音。车间有噪音可能听不见，但戴手套时震动也不明显，两个都留 */
+    val shutterSound: Boolean = true,
 ) {
     /** 两行都关等于没水印，那就别白跑一趟烧录 */
     val burnsAnything: Boolean
@@ -123,6 +127,8 @@ data class AppSettings(
         .put("keepOriginal", keepOriginal)
         .put("recordGps", recordGps)
         .put("scanInViewfinder", scanInViewfinder)
+        .put("shutterVibrate", shutterVibrate)
+        .put("shutterSound", shutterSound)
 
     companion object {
         fun from(o: JSONObject): AppSettings {
@@ -135,6 +141,8 @@ data class AppSettings(
                 keepOriginal = o.optBoolean("keepOriginal", true),
                 recordGps = o.optBoolean("recordGps", false),
                 scanInViewfinder = o.optBoolean("scanInViewfinder", true),
+                shutterVibrate = o.optBoolean("shutterVibrate", true),
+                shutterSound = o.optBoolean("shutterSound", true),
             )
         }
     }

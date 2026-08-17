@@ -43,7 +43,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.abs
-import kotlin.math.roundToInt
 import androidx.compose.ui.viewinterop.AndroidView
 import com.sopcam.sop.SopStep
 import com.sopcam.watermark.Anchor
@@ -81,7 +80,6 @@ fun CameraScreen(
     focusSpot: FocusSpot?,
     focusNote: String?,
     scannedCode: String?,
-    afSupported: Boolean,
     watermarkHeadline: String?,
     watermarkLines: List<String>,
     queueDepth: Int,
@@ -145,6 +143,13 @@ fun CameraScreen(
             // 这样水印画在框里就是所见即所得，也不会被下面的控制条盖住。
             Box(
                 Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .clip(RectangleShape),
+                contentAlignment = Alignment.Center
+            ) {
+            Box(
+                Modifier
                     .fillMaxWidth()
                     .aspectRatio(3f / 4f)
                     .clip(RectangleShape)
@@ -206,6 +211,7 @@ fun CameraScreen(
                     ZoomBar(zoomRatio, minZoom, maxZoom, onZoomPick)
                 }
             }
+            }
 
             scannedCode?.let {
                 Spacer(Modifier.height(8.dp))
@@ -224,20 +230,6 @@ fun CameraScreen(
                 )
             }
 
-            // 临时调试行，问题定位完就删
-            Spacer(Modifier.height(6.dp))
-            Text(
-                "调试 ${(zoomRatio * 10).roundToInt() / 10f}× · 范围 " +
-                    "${(minZoom * 10).roundToInt() / 10f}–${(maxZoom * 10).roundToInt() / 10f}" +
-                    " · 对焦${if (afSupported) "支持" else "不支持"}" +
-                    " · ${focusSpot?.status?.name ?: "无"}",
-                color = Color(0xFF4A525C),
-                fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace,
-                maxLines = 1,
-                modifier = Modifier.padding(horizontal = 16.dp)
-            )
-
             lastSaved?.let {
                 Spacer(Modifier.height(6.dp))
                 Text(
@@ -251,7 +243,6 @@ fun CameraScreen(
                 )
             }
 
-            Spacer(Modifier.weight(1f))
 
             ControlBar(
                 anchor = anchor,

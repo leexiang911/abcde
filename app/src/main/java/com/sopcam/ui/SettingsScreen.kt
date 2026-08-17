@@ -101,6 +101,23 @@ fun SettingsScreen(
         ) { onChange(settings.copy(keepOriginal = it)) }
 
         Spacer(Modifier.height(28.dp))
+        SectionTitle("快门反馈")
+
+        SwitchRow(
+            title = "震动",
+            desc = "按下快门时震一下",
+            checked = settings.shutterVibrate,
+        ) { onChange(settings.copy(shutterVibrate = it)) }
+
+        Spacer(Modifier.height(10.dp))
+
+        SwitchRow(
+            title = "提示音",
+            desc = "按下快门时响一声。跟随系统媒体音量，静音模式下不响。",
+            checked = settings.shutterSound,
+        ) { onChange(settings.copy(shutterSound = it)) }
+
+        Spacer(Modifier.height(28.dp))
         SectionTitle("扫码")
 
         SwitchRow(

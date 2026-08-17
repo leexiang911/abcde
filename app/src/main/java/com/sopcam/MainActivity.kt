@@ -25,6 +25,7 @@ import com.sopcam.capture.CameraBinder
 import com.sopcam.crash.CrashLogger
 import com.sopcam.capture.CapturePipeline
 import com.sopcam.capture.CodeAnalyzer
+import com.sopcam.capture.ShutterFeedback
 import com.sopcam.capture.ScannedCode
 import com.sopcam.capture.Optics
 import com.sopcam.capture.PendingShot
@@ -79,6 +80,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var pipeline: CapturePipeline
     private lateinit var imageCapture: ImageCapture
     private lateinit var orientation: OrientationController
+    private lateinit var feedback: ShutterFeedback
 
     private var crashTrace by mutableStateOf<String?>(null)
     private var hasPermission by mutableStateOf(false)
@@ -132,6 +134,9 @@ class MainActivity : ComponentActivity() {
         get() = activeModel?.platforms?.firstOrNull { it.id == platformId }
             ?.let { PickOption(it.id, it.name, it.customer) }
 
+    private val activeTemplateName: String
+        get() = templates.firstOrNull { it.id == templateId }?.name ?: ""
+
     private val activeSteps: List<SopStep>
         get() = templates.firstOrNull { it.id == templateId }?.steps ?: emptyList()
 
@@ -183,6 +188,7 @@ class MainActivity : ComponentActivity() {
 
         imageCapture = CameraBinder.buildImageCapture(Surface.ROTATION_0)
         analysis = CodeAnalyzer.buildUseCase()
+        feedback = ShutterFeedback(this)
         orientation = OrientationController(this) { rot ->
             imageCapture.targetRotation = rot
             effectiveEdge = TopEdge.of(rot)
@@ -345,7 +351,6 @@ class MainActivity : ComponentActivity() {
                     focusSpot = focusSpot,
                     focusNote = focusNote,
                     scannedCode = scannedCode?.value,
-                    afSupported = afSupported,
                     watermarkHeadline = watermarkHeadline(),
                     watermarkLines = watermarkLines(System.currentTimeMillis()),
                     queueDepth = queueDepth,
@@ -605,17 +610,29 @@ class MainActivity : ComponentActivity() {
             hasWatermark = settings.burnsAnything,
         )
 
+        // 这些必须在 shoot 之前快照。
+        // shoot 的 lambda 要等照片真出来才跑，而下面的 stepIndex += 1 已经在主线程执行完了 ——
+        // 到那时 watermarkHeadline() 读到的是下一步，水印就比实际步骤快一格。
+        val shotContent = WatermarkContent(watermarkHeadline(), watermarkLines(now))
+        val shotAnchor = anchor
+        val shotName = FileNaming.build(step, taken + 1, now, activeTemplateName)
+        val shotPath = FileNaming.relativePath(workOrder, serialNo, now)
+        val shotBurn = settings.burnsAnything
+        val shotKeepRaw = settings.keepOriginal
+
+        feedback.fire(settings.shutterVibrate, settings.shutterSound)
+
         queueDepth += 1
         imageCapture.shoot(pipeline) { bytes ->
             PendingShot(
                 jpeg = bytes,
-                fileName = FileNaming.build(step, taken + 1, now),
-                relativePath = FileNaming.relativePath(workOrder, serialNo, now),
-                content = WatermarkContent(watermarkHeadline(), watermarkLines(now)),
-                anchor = anchor,
+                fileName = shotName,
+                relativePath = shotPath,
+                content = shotContent,
+                anchor = shotAnchor,
                 meta = meta,
-                burnWatermark = settings.burnsAnything,
-                keepOriginal = settings.keepOriginal,
+                burnWatermark = shotBurn,
+                keepOriginal = shotKeepRaw,
             )
         }
 
@@ -643,6 +660,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        feedback.release()
         pipeline.shutdown()
         super.onDestroy()
     }

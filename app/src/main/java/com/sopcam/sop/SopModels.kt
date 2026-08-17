@@ -181,14 +181,22 @@ object FileNaming {
 
     /**
      * 成片文件名。
-     *   03_低压发波_143052
+     *   控制器检修_03_低压发波_143052
      *   03_Q1200-5脚_水泵输出电压_143052
      *   07_上桥管压降_2_143052        ← 同一步骤第 2 张
      *   FREE_143052                   ← 未选模板时的自由拍摄
      *
      * 两位序号前缀是刻意的：电脑上按文件名排序 = 按 SOP 顺序，不用再看时间戳。
      */
-    fun build(step: SopStep?, shotIndex: Int = 1, at: Long = System.currentTimeMillis()): String {
+    fun build(
+        step: SopStep?,
+        shotIndex: Int = 1,
+        at: Long = System.currentTimeMillis(),
+        templateName: String = "",
+    ): String {
+        // 流程名放最前面：同一工单下拍了两个流程时能自然分组，
+        // 组内仍按步骤号排序，不影响"文件名排序 = SOP 顺序"这个性质
+        val prefix = if (templateName.isBlank()) "" else sanitize(templateName, 20) + "_"
         val head = step?.let {
             val idx = it.order.toString().padStart(2, '0')
             val body = if (it.refDes.isBlank()) sanitize(it.name, 44)
@@ -196,7 +204,7 @@ object FileNaming {
             "${idx}_$body"
         } ?: "FREE"
         val dup = if (shotIndex > 1) "_$shotIndex" else ""
-        return "$head$dup" + "_" + timeFmt.format(Date(at))
+        return "$prefix$head$dup" + "_" + timeFmt.format(Date(at))
     }
 
     /**
