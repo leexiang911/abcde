@@ -5,10 +5,12 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,7 +26,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -37,9 +43,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -89,10 +97,20 @@ fun ProjectDetailScreen(
     onRestoreAll: () -> Unit,
     onDeleteShot: (ShotItem) -> Unit,
     onDeleteProject: (DeleteScope) -> Unit,
+    onBatch: (List<ShotItem>, BatchAction) -> Unit,
+    onEditShot: (ShotItem, String, List<String>, String) -> Unit,
     onBack: () -> Unit,
 ) {
-    var viewing by remember { mutableStateOf<ShotItem?>(null) }
+    // 打开查看器时记的是下标而不是对象 —— 左右滑动要靠它在整个列表里走
+    var viewingAt by remember { mutableStateOf<Int?>(null) }
     var confirming by remember { mutableStateOf(false) }
+    var picked by remember { mutableStateOf<Set<String>>(emptySet()) }
+    val selecting = picked.isNotEmpty()
+
+    // 删完图之后下标可能越界
+    LaunchedEffect(shots.size) {
+        if (viewingAt != null && viewingAt!! >= shots.size) viewingAt = null
+    }
 
     Box(Modifier.fillMaxSize().background(Ink)) {
         Column(Modifier.fillMaxSize()) {
@@ -176,13 +194,35 @@ fun ProjectDetailScreen(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    items(shots, key = { it.file.absolutePath }) { item ->
-                        ThumbCell(item) { viewing = item }
+                    itemsIndexed(shots, key = { _, it -> it.file.absolutePath }) { i, item ->
+                        ThumbCell(
+                            item = item,
+                            checked = item.file.absolutePath in picked,
+                            selecting = selecting,
+                            onTap = {
+                                if (selecting) {
+                                    picked = toggle(picked, item)
+                                } else {
+                                    viewingAt = i
+                                }
+                            },
+                            onLongPress = { picked = toggle(picked, item) }
+                        )
                     }
                 }
             }
 
-            if (shots.isNotEmpty()) {
+            if (selecting) {
+                BatchBar(
+                    count = picked.size,
+                    busy = busy,
+                    onAction = { act ->
+                        onBatch(shots.filter { it.file.absolutePath in picked }, act)
+                        picked = emptySet()
+                    },
+                    onCancel = { picked = emptySet() }
+                )
+            } else if (shots.isNotEmpty()) {
                 Text(
                     "把这 ${shots.size} 张全部重烧回相册",
                     color = Ink,
@@ -200,7 +240,7 @@ fun ProjectDetailScreen(
                 Spacer(Modifier.height(10.dp))
             }
 
-            Box(
+            if (!selecting) Box(
                 Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp)
@@ -221,19 +261,20 @@ fun ProjectDetailScreen(
             }
         }
 
-        viewing?.let { item ->
-            ShotViewer(
-                item = item,
-                onRestore = {
-                    onRestoreOne(item)
-                    viewing = null
-                },
-                onDelete = {
-                    onDeleteShot(item)
-                    viewing = null
-                },
-                onClose = { viewing = null }
-            )
+        viewingAt?.let { start ->
+            if (start < shots.size) {
+                ShotPager(
+                    shots = shots,
+                    startAt = start,
+                    onRestore = onRestoreOne,
+                    onEdit = onEditShot,
+                    onDelete = { item ->
+                        onDeleteShot(item)
+                        if (shots.size <= 1) viewingAt = null
+                    },
+                    onClose = { viewingAt = null }
+                )
+            }
         }
 
         if (confirming) {
@@ -250,8 +291,15 @@ fun ProjectDetailScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ThumbCell(item: ShotItem, onTap: () -> Unit) {
+private fun ThumbCell(
+    item: ShotItem,
+    checked: Boolean,
+    selecting: Boolean,
+    onTap: () -> Unit,
+    onLongPress: () -> Unit,
+) {
     var bmp by remember(item.file.absolutePath) { mutableStateOf<Bitmap?>(null) }
 
     // 解码放到 IO 线程，几十张一起解会把主线程卡死
@@ -264,7 +312,7 @@ private fun ThumbCell(item: ShotItem, onTap: () -> Unit) {
             .aspectRatio(1f)
             .clip(RoundedCornerShape(6.dp))
             .background(Panel)
-            .clickable(onClick = onTap)
+            .combinedClickable(onClick = onTap, onLongClick = onLongPress)
     ) {
         bmp?.let {
             Image(
@@ -272,6 +320,37 @@ private fun ThumbCell(item: ShotItem, onTap: () -> Unit) {
                 contentDescription = item.stepName,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        if (selecting) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(if (checked) Color(0x66FDCE04) else Color(0x99000000))
+            )
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(5.dp)
+                    .size(18.dp)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(if (checked) Amber else Color(0x66FFFFFF)),
+                contentAlignment = Alignment.Center
+            ) {
+                if (checked) Text("✓", color = Ink, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+
+        // 有码的角上点一个绿点，一眼看出哪些带了码值 —— 误带的也就好找了
+        if (item.codeValue.isNotBlank() && !selecting) {
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(5.dp)
+                    .size(8.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Done)
             )
         }
 
@@ -308,7 +387,9 @@ private fun ThumbCell(item: ShotItem, onTap: () -> Unit) {
 @Composable
 private fun ShotViewer(
     item: ShotItem,
+    indexLabel: String,
     onRestore: () -> Unit,
+    onEdit: (String, List<String>, String) -> Unit,
     onDelete: () -> Unit,
     onClose: () -> Unit,
 ) {
@@ -323,13 +404,9 @@ private fun ShotViewer(
         bmp = withContext(Dispatchers.IO) { Thumbs.full(item.file) }
     }
 
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(Color(0xF2000000))
-            .clickable(onClick = onClose),
-        contentAlignment = Alignment.Center
-    ) {
+    var editing by remember(item.file.absolutePath) { mutableStateOf(false) }
+
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         bmp?.let {
             Image(
                 bitmap = it.asImageBitmap(),
@@ -356,7 +433,11 @@ private fun ShotViewer(
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(Modifier.height(3.dp))
-            Text(shotTimeFmt.format(Date(item.at)), color = Steel, fontSize = 12.sp)
+            Text(
+                "$indexLabel  ·  ${shotTimeFmt.format(Date(item.at))}",
+                color = Steel,
+                fontSize = 12.sp
+            )
             if (code.isNotBlank()) {
                 Spacer(Modifier.height(8.dp))
                 Text(
@@ -435,6 +516,31 @@ private fun ShotViewer(
                             .padding(horizontal = 20.dp, vertical = 12.dp)
                     )
                 }
+                if (code.isNotBlank()) {
+                    Text(
+                        "清除码值",
+                        color = Steel,
+                        fontSize = 14.sp,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .border(1.dp, Color(0xFF2A3037), RoundedCornerShape(6.dp))
+                            .clickable {
+                                Archive.clearSidecarCode(item.file)
+                                code = ""
+                            }
+                            .padding(horizontal = 20.dp, vertical = 12.dp)
+                    )
+                }
+                Text(
+                    "改水印",
+                    color = Color.White,
+                    fontSize = 14.sp,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color(0xFF262D35))
+                        .clickable { editing = true }
+                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                )
                 Text(
                     "重烧回相册",
                     color = Ink,
@@ -468,6 +574,142 @@ private fun ShotViewer(
                 )
             }
         }
+
+        if (editing) {
+            EditShotDialog(
+                item = item,
+                onCancel = { editing = false },
+                onSave = { h, l, n ->
+                    editing = false
+                    onEdit(h, l, n)
+                }
+            )
+        }
+    }
+}
+
+/**
+ * 改水印文字和文件名。
+ *
+ * 改的是归档里那份随行 json，屏幕上和相册里的成片不会立刻变 ——
+ * 要按"重烧回相册"才会按新内容重新生成一张。这样改错了也不至于毁掉已有成片。
+ */
+@Composable
+private fun EditShotDialog(
+    item: ShotItem,
+    onCancel: () -> Unit,
+    onSave: (String, List<String>, String) -> Unit,
+) {
+    val side = remember(item.file.absolutePath) { Archive.sidecar(item.file) }
+    var headline by remember {
+        mutableStateOf(side?.optString("headline").orEmpty())
+    }
+    var body by remember {
+        mutableStateOf(
+            side?.optJSONArray("lines")?.let { arr ->
+                (0 until arr.length()).joinToString("\n") { arr.optString(it) }
+            }.orEmpty()
+        )
+    }
+    var name by remember {
+        mutableStateOf(
+            side?.optString("fileName")?.takeIf { it.isNotBlank() }
+                ?: item.file.nameWithoutExtension
+        )
+    }
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color(0xF0000000))
+            .clickable(onClick = onCancel),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            Modifier
+                .padding(20.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Panel)
+                .clickable(enabled = false) {}
+                .padding(18.dp)
+        ) {
+            Text("改水印", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(14.dp))
+
+            EditField("标题行（步骤）", headline) { headline = it }
+            Spacer(Modifier.height(12.dp))
+            EditField("正文（一行一条）", body, minLines = 3) { body = it }
+            Spacer(Modifier.height(12.dp))
+            EditField("文件名（不含扩展名）", name) { name = it }
+
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "保存后按「重烧回相册」才会生成新的成片，原有的不受影响",
+                color = Color(0xFF4A525C),
+                fontSize = 11.sp,
+                lineHeight = 17.sp
+            )
+
+            Spacer(Modifier.height(16.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "保存",
+                    color = Ink,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Amber)
+                        .clickable {
+                            onSave(
+                                headline.trim(),
+                                body.split("\n").map { it.trim() }.filter { it.isNotEmpty() },
+                                name.trim()
+                            )
+                        }
+                        .padding(vertical = 13.dp)
+                )
+                Text(
+                    "取消",
+                    color = Steel,
+                    fontSize = 15.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .border(1.dp, Color(0xFF2A3037), RoundedCornerShape(8.dp))
+                        .clickable(onClick = onCancel)
+                        .padding(vertical = 13.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun EditField(
+    label: String,
+    value: String,
+    minLines: Int = 1,
+    onChange: (String) -> Unit,
+) {
+    Column {
+        Text(label, color = Steel, fontSize = 12.sp)
+        Spacer(Modifier.height(5.dp))
+        BasicTextField(
+            value = value,
+            onValueChange = onChange,
+            textStyle = TextStyle(color = Color.White, fontSize = 14.sp),
+            cursorBrush = SolidColor(Amber),
+            minLines = minLines,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(6.dp))
+                .background(Ink)
+                .padding(horizontal = 12.dp, vertical = 11.dp)
+        )
     }
 }
 
@@ -618,5 +860,121 @@ private fun copyText(ctx: Context, text: String) {
     runCatching {
         val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         cm.setPrimaryClip(ClipData.newPlainText("SOP Camera", text))
+    }
+}
+
+enum class BatchAction { SCAN, CLEAR_CODE, DELETE }
+
+private fun toggle(set: Set<String>, item: ShotItem): Set<String> {
+    val k = item.file.absolutePath
+    return if (k in set) set - k else set + k
+}
+
+@Composable
+private fun BatchBar(
+    count: Int,
+    busy: String?,
+    onAction: (BatchAction) -> Unit,
+    onCancel: () -> Unit,
+) {
+    var confirmDelete by remember { mutableStateOf(false) }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .padding(bottom = 20.dp)
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(bottom = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("已选 $count 张", color = Amber, fontSize = 14.sp)
+            Text(
+                "取消",
+                color = Steel,
+                fontSize = 13.sp,
+                modifier = Modifier.clickable(onClick = onCancel).padding(8.dp)
+            )
+        }
+
+        if (busy != null) {
+            Text(busy, color = Amber, fontSize = 13.sp)
+            return@Column
+        }
+
+        if (confirmDelete) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                BatchButton("确认删除 $count 张", Color(0xFFE86A5C), Ink, Modifier.weight(1f)) {
+                    confirmDelete = false
+                    onAction(BatchAction.DELETE)
+                }
+                BatchButton("返回", Color(0xFF262D35), Color.White) { confirmDelete = false }
+            }
+            return@Column
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            BatchButton("批量扫码", Done, Ink, Modifier.weight(1f)) { onAction(BatchAction.SCAN) }
+            BatchButton("清除码值", Color(0xFF262D35), Color.White, Modifier.weight(1f)) {
+                onAction(BatchAction.CLEAR_CODE)
+            }
+            BatchButton("删除", Color(0xFF3A2326), Color(0xFFE86A5C)) { confirmDelete = true }
+        }
+    }
+}
+
+@Composable
+private fun BatchButton(
+    label: String,
+    bg: Color,
+    fg: Color,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Text(
+        label,
+        color = fg,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.Medium,
+        textAlign = TextAlign.Center,
+        maxLines = 1,
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(bg)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 13.dp)
+    )
+}
+
+/** 左右滑动看整个项目的图。滑到哪张就查看哪张，操作按钮跟着当前页走 */
+@Composable
+private fun ShotPager(
+    shots: List<ShotItem>,
+    startAt: Int,
+    onRestore: (ShotItem) -> Unit,
+    onEdit: (ShotItem, String, List<String>, String) -> Unit,
+    onDelete: (ShotItem) -> Unit,
+    onClose: () -> Unit,
+) {
+    val pager = rememberPagerState(
+        initialPage = startAt.coerceIn(0, (shots.size - 1).coerceAtLeast(0)),
+        pageCount = { shots.size }
+    )
+
+    Box(Modifier.fillMaxSize().background(Color(0xF5000000))) {
+        HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
+            shots.getOrNull(page)?.let { item ->
+                ShotViewer(
+                    item = item,
+                    indexLabel = "${page + 1} / ${shots.size}",
+                    onRestore = { onRestore(item) },
+                    onEdit = { h, l, n -> onEdit(item, h, l, n) },
+                    onDelete = { onDelete(item) },
+                    onClose = onClose
+                )
+            }
+        }
     }
 }

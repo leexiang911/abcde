@@ -254,6 +254,28 @@ object Archive {
         }.getOrDefault(false)
     }
 
+    /** 清掉误带上的码值。批量清除用的就是它 */
+    fun clearSidecarCode(raw: File): Boolean = updateSidecarCode(raw, "", "")
+
+    /** 改水印文字和目标文件名，改完再"重烧回相册"才会生效 */
+    fun updateSidecarWatermark(
+        raw: File,
+        headline: String,
+        lines: List<String>,
+        fileName: String,
+    ): Boolean {
+        val f = File(raw.parentFile, raw.nameWithoutExtension + ".json")
+        if (!f.exists()) return false
+        return runCatching {
+            val o = JSONObject(f.readText())
+                .put("headline", headline)
+                .put("lines", JSONArray().apply { lines.forEach { put(it) } })
+                .put("fileName", fileName)
+            f.writeText(o.toString())
+            true
+        }.getOrDefault(false)
+    }
+
     fun sidecar(raw: File): JSONObject? = runCatching {
         val f = File(raw.parentFile, raw.nameWithoutExtension + ".json")
         if (f.exists()) JSONObject(f.readText()) else null

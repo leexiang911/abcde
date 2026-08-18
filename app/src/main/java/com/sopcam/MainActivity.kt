@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.location.LocationManager
 import android.content.Intent
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -34,6 +35,7 @@ import com.sopcam.archive.Thumbs
 import com.sopcam.crash.CrashLogger
 import com.sopcam.capture.CapturePipeline
 import com.sopcam.capture.CodeAnalyzer
+import com.sopcam.capture.Codes
 import com.sopcam.capture.ShutterFeedback
 import com.sopcam.capture.ScannedCode
 import com.sopcam.capture.Optics
@@ -55,6 +57,7 @@ import androidx.camera.core.Camera
 import androidx.camera.core.ImageAnalysis
 import com.sopcam.ui.CameraScreen
 import com.sopcam.ui.DeleteScope
+import com.sopcam.ui.BatchAction
 import com.sopcam.ui.ProjectDetailScreen
 import com.sopcam.ui.ProjectsScreen
 import com.sopcam.ui.ShotItem
@@ -424,6 +427,11 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         },
+                        onBatch = { items, act -> runBatch(p.serialNo, items, act) },
+                        onEditShot = { item, headline, lines, name ->
+                            Archive.updateSidecarWatermark(item.file, headline, lines, name)
+                            openShots = readShots(p.serialNo)
+                        },
                         onDeleteProject = { scope ->
                             when (scope) {
                                 DeleteScope.GALLERY_ONLY -> Purge.galleryOf(this, p.serialNo)
@@ -602,6 +610,59 @@ class MainActivity : ComponentActivity() {
             !archiveReady -> "原图不会被保存：缺少文件访问权限，去设置里开启"
             serialNo.isBlank() -> "序列号是空的，原图会归到「未命名」项目下"
             else -> null
+        }
+    }
+
+    /**
+     * 批量操作。
+     *
+     * 扫码那条最慢 —— 每张都要解全分辨率位图再喂给 ML Kit，
+     * 所以全程在 IO 线程跑，并把进度报到界面上。
+     */
+    private fun runBatch(serialNo: String, items: List<ShotItem>, act: BatchAction) {
+        if (items.isEmpty()) return
+        detailBusy = when (act) {
+            BatchAction.SCAN -> "识别中 0 / ${items.size}"
+            BatchAction.CLEAR_CODE -> "清除中…"
+            BatchAction.DELETE -> "删除中…"
+        }
+        lifecycleScope.launch(Dispatchers.IO) {
+            var hit = 0
+            items.forEachIndexed { i, item ->
+                when (act) {
+                    BatchAction.SCAN -> {
+                        withContext(Dispatchers.Main) {
+                            detailBusy = "识别中 ${i + 1} / ${items.size}"
+                        }
+                        val bmp = BitmapFactory.decodeFile(item.file.path)
+                        val found = bmp?.let { Codes.scan(it) }
+                        bmp?.recycle()
+                        if (found != null) {
+                            Archive.updateSidecarCode(item.file, found.value, found.format)
+                            hit++
+                        }
+                    }
+                    BatchAction.CLEAR_CODE -> {
+                        Archive.clearSidecarCode(item.file)
+                        hit++
+                    }
+                    BatchAction.DELETE -> {
+                        Purge.shot(item.file)
+                        Thumbs.evict(item.file)
+                        hit++
+                    }
+                }
+            }
+            withContext(Dispatchers.Main) {
+                detailBusy = null
+                openShots = readShots(serialNo)
+                projects = Archive.list()
+                lastSaved = when (act) {
+                    BatchAction.SCAN -> "识别出 $hit / ${items.size} 张"
+                    BatchAction.CLEAR_CODE -> "已清除 $hit 张的码值"
+                    BatchAction.DELETE -> "已删除 $hit 张"
+                }
+            }
         }
     }
 
@@ -814,8 +875,14 @@ class MainActivity : ComponentActivity() {
             stepOrder = step?.order ?: 0,
             stepName = step?.name ?: "",
             stepRefDes = step?.refDes ?: "",
-            codeValue = scannedCode?.value ?: "",
-            codeFormat = scannedCode?.format ?: "",
+            // 这里刻意留空。
+            //
+            // 以前是把取景时扫到的码带进来，但那个值会"记住"不清空，
+            // 结果后面每张不含码的照片都继承了上一张的码，元数据被灌脏。
+            // 现在每张照片的码由流水线对它自己的全分辨率成片扫出来，
+            // 谁有码谁才有，取景那路只当提示看。
+            codeValue = "",
+            codeFormat = "",
             anchor = anchor.name,
             topEdge = (if (topEdge == TopEdge.AUTO) effectiveEdge else topEdge).name,
             latitude = gps?.first,
