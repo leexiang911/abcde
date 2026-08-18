@@ -94,15 +94,24 @@ class CapturePipeline(
         val w = bmp.width
         val h = bmp.height
 
+        // 趁位图还没被水印污染，对全分辨率成片再扫一次码。
+        // 预览那路只有 1600x1200，板子上的 Data Matrix 模块细，经常扫不出；
+        // 这张是 4000x3000，多六倍像素，成功率高得多。
+        // 预览已经扫到的话就不重复跑 —— 那说明码足够清楚。
+        val meta = if (shot.meta.codeValue.isNotBlank()) shot.meta else {
+            Codes.scan(bmp)?.let { shot.meta.copy(codeValue = it.value, codeFormat = it.format) }
+                ?: shot.meta
+        }
+
         // 原图进归档区，不进相册 —— 相册里只放水印照片，
         // 原图是给"以后重烧水印"用的兜底数据，混进相册只会看着乱
         if (shot.keepOriginal) {
             val rawBytes = encode(bmp)
             val result = withContext(Dispatchers.IO) {
                 Archive.save(
-                    serialNo = shot.meta.serialNo,
+                    serialNo = meta.serialNo,
                     jpeg = rawBytes,
-                    meta = shot.meta,
+                    meta = meta,
                     watermarkLines = shot.lines,
                     headline = shot.headline,
                     fileName = shot.fileName,
@@ -129,7 +138,7 @@ class CapturePipeline(
         bmp.recycle()
 
         return withContext(Dispatchers.IO) {
-            write(finalBytes, "${shot.fileName}.jpg", shot.relativePath, shot.meta, w, h)
+            write(finalBytes, "${shot.fileName}.jpg", shot.relativePath, meta, w, h)
         }
     }
 

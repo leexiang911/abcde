@@ -241,6 +241,19 @@ object Archive {
         projectDir(serialNo).deleteRecursively()
     }.getOrDefault(false)
 
+    /** 事后补扫出来的码值，写回随行 json。恢复水印时就能带上它 */
+    fun updateSidecarCode(raw: File, value: String, format: String): Boolean {
+        val f = File(raw.parentFile, raw.nameWithoutExtension + ".json")
+        if (!f.exists()) return false
+        return runCatching {
+            val o = JSONObject(f.readText())
+                .put("codeValue", value)
+                .put("codeFormat", format)
+            f.writeText(o.toString())
+            true
+        }.getOrDefault(false)
+    }
+
     fun sidecar(raw: File): JSONObject? = runCatching {
         val f = File(raw.parentFile, raw.nameWithoutExtension + ".json")
         if (f.exists()) JSONObject(f.readText()) else null

@@ -1,6 +1,10 @@
 package com.sopcam.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -27,6 +31,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,6 +39,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -42,17 +48,25 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sopcam.archive.Archive
 import com.sopcam.archive.Thumbs
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import com.sopcam.capture.Codes
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private val shotTimeFmt = SimpleDateFormat("MM-dd HH:mm", Locale.CHINA)
 
 /** 一张原图 + 它随行 json 里的步骤信息 */
-data class ShotItem(val file: File, val stepOrder: Int, val stepName: String, val at: Long)
+data class ShotItem(
+    val file: File,
+    val stepOrder: Int,
+    val stepName: String,
+    val at: Long,
+    val codeValue: String = "",
+)
 
 fun readShots(serialNo: String): List<ShotItem> = Archive.shots(serialNo).map { f ->
     val side = Archive.sidecar(f)
@@ -61,6 +75,7 @@ fun readShots(serialNo: String): List<ShotItem> = Archive.shots(serialNo).map { 
         stepOrder = side?.optInt("stepOrder", 0) ?: 0,
         stepName = side?.optString("stepName") ?: "",
         at = side?.optLong("capturedAt", f.lastModified()) ?: f.lastModified(),
+        codeValue = side?.optString("codeValue") ?: "",
     )
 }
 
@@ -297,8 +312,12 @@ private fun ShotViewer(
     onDelete: () -> Unit,
     onClose: () -> Unit,
 ) {
+    val ctx = LocalContext.current
     var bmp by remember(item.file.absolutePath) { mutableStateOf<Bitmap?>(null) }
     var confirming by remember { mutableStateOf(false) }
+    var code by remember(item.file.absolutePath) { mutableStateOf(item.codeValue) }
+    var scanning by remember(item.file.absolutePath) { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(item.file.absolutePath) {
         bmp = withContext(Dispatchers.IO) { Thumbs.full(item.file) }
@@ -338,6 +357,22 @@ private fun ShotViewer(
             )
             Spacer(Modifier.height(3.dp))
             Text(shotTimeFmt.format(Date(item.at)), color = Steel, fontSize = 12.sp)
+            if (code.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    code,
+                    color = Done,
+                    fontSize = 13.sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color(0x332CC38A))
+                        .clickable { copyText(ctx, code) }
+                        .padding(horizontal = 10.dp, vertical = 7.dp)
+                )
+                Spacer(Modifier.height(3.dp))
+                Text("点一下复制", color = Color(0xFF4A525C), fontSize = 10.sp)
+            }
         }
 
         Row(
@@ -369,6 +404,37 @@ private fun ShotViewer(
                         .padding(horizontal = 20.dp, vertical = 12.dp)
                 )
             } else {
+                if (code.isBlank()) {
+                    Text(
+                        if (scanning) "识别中…" else "扫码",
+                        color = Ink,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (scanning) Steel else Done)
+                            .clickable(enabled = !scanning) {
+                                scanning = true
+                                scope.launch {
+                                    // 拿全分辨率原图去扫，不是屏幕上这张缩过的
+                                    val hit = withContext(Dispatchers.IO) {
+                                        val full = BitmapFactory.decodeFile(item.file.path)
+                                        val r = full?.let { Codes.scan(it) }
+                                        full?.recycle()
+                                        r
+                                    }
+                                    if (hit != null) {
+                                        Archive.updateSidecarCode(item.file, hit.value, hit.format)
+                                        code = hit.value
+                                    } else {
+                                        code = "· 没认出来"
+                                    }
+                                    scanning = false
+                                }
+                            }
+                            .padding(horizontal = 20.dp, vertical = 12.dp)
+                    )
+                }
                 Text(
                     "重烧回相册",
                     color = Ink,
@@ -545,5 +611,12 @@ private fun StatusPicker(current: Archive.Status, onPick: (Archive.Status) -> Un
                 )
             }
         }
+    }
+}
+
+private fun copyText(ctx: Context, text: String) {
+    runCatching {
+        val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("SOP Camera", text))
     }
 }
