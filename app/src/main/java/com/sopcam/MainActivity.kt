@@ -384,6 +384,7 @@ class MainActivity : ComponentActivity() {
                         screen = Screen.PROJECT_DETAIL
                     },
                     onExport = ::runExport,
+                    onDelete = ::runBulkDelete,
                     onBack = {
                         picked = emptySet()
                         screen = Screen.SETUP
@@ -661,6 +662,32 @@ class MainActivity : ComponentActivity() {
                     BatchAction.SCAN -> "识别出 $hit / ${items.size} 张"
                     BatchAction.CLEAR_CODE -> "已清除 $hit 张的码值"
                     BatchAction.DELETE -> "已删除 $hit 张"
+                }
+            }
+        }
+    }
+
+    /** 列表页多选删除。只清相册那档随时能重烧回来，删项目那档已在界面上要过输入确认 */
+    private fun runBulkDelete(scope: DeleteScope) {
+        val serials = picked.toList()
+        if (serials.isEmpty()) return
+        exporting = "删除中…"
+        lifecycleScope.launch(Dispatchers.IO) {
+            var gallery = 0
+            serials.forEach { sn ->
+                if (scope != DeleteScope.ARCHIVE_ONLY) {
+                    gallery += Purge.galleryOf(this@MainActivity, sn)
+                }
+                if (scope != DeleteScope.GALLERY_ONLY) Purge.archiveOf(sn)
+            }
+            withContext(Dispatchers.Main) {
+                exporting = null
+                picked = emptySet()
+                projects = Archive.list()
+                lastSaved = when (scope) {
+                    DeleteScope.GALLERY_ONLY -> "已删 $gallery 张水印图，原图还在"
+                    DeleteScope.ARCHIVE_ONLY -> "已删 ${serials.size} 个项目的原图"
+                    DeleteScope.BOTH -> "已删除 ${serials.size} 个项目"
                 }
             }
         }

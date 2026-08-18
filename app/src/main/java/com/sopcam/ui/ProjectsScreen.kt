@@ -1,12 +1,6 @@
 package com.sopcam.ui
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -24,16 +18,23 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sopcam.archive.Archive
@@ -58,6 +59,7 @@ fun ProjectsScreen(
     onStatusFilter: (Archive.Status?) -> Unit,
     onSelectAll: (List<String>) -> Unit,
     onExport: (Exporter.Options) -> Unit,
+    onDelete: (DeleteScope) -> Unit,
     onBack: () -> Unit,
 ) {
     val sheetOpen = selected.isNotEmpty()
@@ -158,7 +160,7 @@ fun ProjectsScreen(
 
         if (sheetOpen) {
             Box(Modifier.align(Alignment.BottomCenter)) {
-                ExportBar(selected.toList(), exporting, onExport)
+                ExportBar(selected.toList(), exporting, onExport, onDelete)
             }
         }
     }
@@ -248,7 +250,25 @@ private fun ExportBar(
     serials: List<String>,
     exporting: String?,
     onExport: (Exporter.Options) -> Unit,
+    onDelete: (DeleteScope) -> Unit,
 ) {
+    // 导出和删除并排，但删除要先摊开范围再确认 ——
+    // 多项目一起删比单项目危险得多，不能一按就没
+    var deleting by remember { mutableStateOf(false) }
+
+    if (deleting) {
+        ConfirmTypedDialog(
+            title = "删除 ${serials.size} 个项目",
+            detail = "这些控制器的原图和水印照片会一起清空，之后再也重烧不出来。" +
+                "只想清相册的话，用左边那个「删除水印图片」。",
+            actionLabel = "删除",
+            onCancel = { deleting = false },
+            onConfirm = {
+                deleting = false
+                onDelete(DeleteScope.BOTH)
+            }
+        )
+    }
     // 按下导出之前先把张数和体积摆出来 —— 微信传文件有上限，
     // 80MB 的包发不出去，事后才发现最耽误事
     val wm = remember(serials) { Exporter.plan(serials, Exporter.Options(true, false)) }
@@ -293,6 +313,37 @@ private fun ExportBar(
             wm.fileCount + raw.fileCount > 0,
             primary = true
         ) { onExport(Exporter.Options(watermarked = true, original = true)) }
+
+        Spacer(Modifier.height(14.dp))
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // 只删相册成片：原图还在，随时能重烧回来，所以不设门槛
+            Text(
+                "删除水印图片",
+                color = Color.White,
+                fontSize = 13.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFF262D35))
+                    .clickable { onDelete(DeleteScope.GALLERY_ONLY) }
+                    .padding(vertical = 13.dp)
+            )
+            // 连原图一起删：不可恢复，走输入确认
+            Text(
+                "删除项目",
+                color = Color(0xFFE86A5C),
+                fontSize = 13.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .border(1.dp, Color(0x55E86A5C), RoundedCornerShape(8.dp))
+                    .clickable { deleting = true }
+                    .padding(vertical = 13.dp)
+            )
+        }
 
         Spacer(Modifier.height(10.dp))
         Text(

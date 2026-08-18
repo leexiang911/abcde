@@ -105,6 +105,8 @@ fun ProjectDetailScreen(
     var viewingAt by remember { mutableStateOf<Int?>(null) }
     var confirming by remember { mutableStateOf(false) }
     var picked by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var confirmBatchDelete by remember { mutableStateOf(false) }
+    var pendingScope by remember { mutableStateOf<DeleteScope?>(null) }
     val selecting = picked.isNotEmpty()
 
     // 删完图之后下标可能越界
@@ -220,6 +222,7 @@ fun ProjectDetailScreen(
                         onBatch(shots.filter { it.file.absolutePath in picked }, act)
                         picked = emptySet()
                     },
+                    onRequestDelete = { confirmBatchDelete = true },
                     onCancel = { picked = emptySet() }
                 )
             } else if (shots.isNotEmpty()) {
@@ -277,6 +280,38 @@ fun ProjectDetailScreen(
             }
         }
 
+        pendingScope?.let { scope ->
+            ConfirmTypedDialog(
+                title = if (scope == DeleteScope.BOTH) "删除整个项目" else "删除全部原图",
+                detail = if (scope == DeleteScope.BOTH)
+                    "${project.serialNo} 的原图和相册成片会一起清空，不可恢复。"
+                else
+                    "${project.serialNo} 的 ${shots.size} 张原图会被删除，相册成片保留，" +
+                        "但以后不能再重烧。",
+                actionLabel = "删除",
+                onCancel = { pendingScope = null },
+                onConfirm = {
+                    pendingScope = null
+                    onDeleteProject(scope)
+                }
+            )
+        }
+
+        if (confirmBatchDelete) {
+            ConfirmTypedDialog(
+                title = "删除 ${picked.size} 张原图",
+                detail = "删的是归档里的原图，删完这几张就再也重烧不出水印照片了。" +
+                    "相册里已有的成片不受影响。",
+                actionLabel = "删除",
+                onCancel = { confirmBatchDelete = false },
+                onConfirm = {
+                    confirmBatchDelete = false
+                    onBatch(shots.filter { it.file.absolutePath in picked }, BatchAction.DELETE)
+                    picked = emptySet()
+                }
+            )
+        }
+
         if (confirming) {
             DeleteProjectDialog(
                 serialNo = project.serialNo,
@@ -284,7 +319,10 @@ fun ProjectDetailScreen(
                 onCancel = { confirming = false },
                 onConfirm = { scope ->
                     confirming = false
-                    onDeleteProject(scope)
+                    // 只清相册的随时能重烧回来，不设门槛；
+                    // 碰到原图的两档不可恢复，要手打确认
+                    if (scope == DeleteScope.GALLERY_ONLY) onDeleteProject(scope)
+                    else pendingScope = scope
                 }
             )
         }
@@ -875,10 +913,9 @@ private fun BatchBar(
     count: Int,
     busy: String?,
     onAction: (BatchAction) -> Unit,
+    onRequestDelete: () -> Unit,
     onCancel: () -> Unit,
 ) {
-    var confirmDelete by remember { mutableStateOf(false) }
-
     Column(
         Modifier
             .fillMaxWidth()
@@ -904,23 +941,12 @@ private fun BatchBar(
             return@Column
         }
 
-        if (confirmDelete) {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                BatchButton("确认删除 $count 张", Color(0xFFE86A5C), Ink, Modifier.weight(1f)) {
-                    confirmDelete = false
-                    onAction(BatchAction.DELETE)
-                }
-                BatchButton("返回", Color(0xFF262D35), Color.White) { confirmDelete = false }
-            }
-            return@Column
-        }
-
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             BatchButton("批量扫码", Done, Ink, Modifier.weight(1f)) { onAction(BatchAction.SCAN) }
             BatchButton("清除码值", Color(0xFF262D35), Color.White, Modifier.weight(1f)) {
                 onAction(BatchAction.CLEAR_CODE)
             }
-            BatchButton("删除", Color(0xFF3A2326), Color(0xFFE86A5C)) { confirmDelete = true }
+            BatchButton("删除", Color(0xFF3A2326), Color(0xFFE86A5C), onClick = onRequestDelete)
         }
     }
 }
