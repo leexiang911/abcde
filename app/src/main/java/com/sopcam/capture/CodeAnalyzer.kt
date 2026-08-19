@@ -1,6 +1,10 @@
 package com.sopcam.capture
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.BitmapRegionDecoder
+import android.graphics.Rect
+import android.os.Build
 import android.util.Size
 import androidx.annotation.OptIn
 import androidx.camera.core.ExperimentalGetImage
@@ -14,7 +18,9 @@ import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
 import kotlin.coroutines.resume
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 
 /** 扫到的码 */
 data class ScannedCode(val value: String, val format: String)
@@ -142,7 +148,16 @@ object Codes {
      *
      * ML Kit 的 Task 是异步的，这里挂起等它，好让流水线在写元数据之前拿到码值。
      */
-    suspend fun scan(bmp: Bitmap): ScannedCode? = suspendCancellableCoroutine { cont ->
+    /**
+     * 级联识别：ML Kit 打头，扫不出来再交给 ZXing 的红通道那几趟。
+     *
+     * 顺序是有意的 —— 大部分码 ML Kit 一步就过，速度不受影响；
+     * 只有难啃的（反色 Data Matrix、铜绿低反差）才多花两三百毫秒。
+     */
+    suspend fun scan(bmp: Bitmap): ScannedCode? =
+        mlkit(bmp) ?: withContext(Dispatchers.Default) { ZxingDecoder.scan(bmp) }
+
+    private suspend fun mlkit(bmp: Bitmap): ScannedCode? = suspendCancellableCoroutine { cont ->
         fun finish(v: ScannedCode?) {
             if (cont.isActive) cont.resume(v)
         }
@@ -157,4 +172,46 @@ object Codes {
                 .addOnFailureListener { finish(null) }
         }.onFailure { finish(null) }
     }
+}
+
+/**
+ * 框选区域识别。
+ *
+ * 整张 4000x3000 里，码可能只占一小块 —— 解码器要先在满屏噪声里找定位图形，
+ * 找错了后面全白搭。框出来单独解，等于把模块的有效像素数放大好几倍。
+ *
+ * 用 BitmapRegionDecoder 直接从文件里读那一块，不用把整张 12MP 载进内存。
+ */
+object RegionScan {
+
+    suspend fun scan(path: String, left: Int, top: Int, right: Int, bottom: Int): ScannedCode? =
+        withContext(Dispatchers.IO) {
+            val crop = decodeRegion(path, left, top, right, bottom) ?: return@withContext null
+            val hit = Codes.scan(crop)
+            crop.recycle()
+            hit
+        }
+
+    private fun decodeRegion(path: String, l: Int, t: Int, r: Int, b: Int): Bitmap? = runCatching {
+        val dec = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            BitmapRegionDecoder.newInstance(path)
+        } else {
+            @Suppress("DEPRECATION")
+            BitmapRegionDecoder.newInstance(path, false)
+        } ?: return null
+
+        val rect = Rect(
+            l.coerceAtLeast(0),
+            t.coerceAtLeast(0),
+            r.coerceAtMost(dec.width),
+            b.coerceAtMost(dec.height)
+        )
+        if (rect.width() < 16 || rect.height() < 16) return null
+
+        val out = dec.decodeRegion(rect, BitmapFactory.Options().apply {
+            inPreferredConfig = Bitmap.Config.ARGB_8888   // 红通道要原色，不能用 RGB_565
+        })
+        dec.recycle()
+        out
+    }.getOrNull()
 }

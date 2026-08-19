@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.sp
 import com.sopcam.archive.Archive
 import com.sopcam.archive.Thumbs
 import com.sopcam.capture.Codes
+import com.sopcam.capture.RegionScan
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -441,6 +442,9 @@ private fun ShotViewer(
     var confirming by remember { mutableStateOf(false) }
     var code by remember(item.file.absolutePath) { mutableStateOf(item.codeValue) }
     var scanning by remember(item.file.absolutePath) { mutableStateOf(false) }
+    var offerCrop by remember(item.file.absolutePath) { mutableStateOf(false) }
+    var cropping by remember(item.file.absolutePath) { mutableStateOf(false) }
+    var cropNote by remember(item.file.absolutePath) { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(item.file.absolutePath) {
@@ -528,7 +532,23 @@ private fun ShotViewer(
                         .padding(horizontal = 20.dp, vertical = 12.dp)
                 )
             } else {
-                if (code.isBlank()) {
+                if (offerCrop && !scanning) {
+                    Text(
+                        "框选重试",
+                        color = Ink,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Done)
+                            .clickable {
+                                cropNote = null
+                                cropping = true
+                            }
+                            .padding(horizontal = 20.dp, vertical = 12.dp)
+                    )
+                }
+                if (code.isBlank() && !offerCrop) {
                     Text(
                         if (scanning) "识别中…" else "扫码",
                         color = Ink,
@@ -552,6 +572,9 @@ private fun ShotViewer(
                                         code = hit.value
                                     } else {
                                         code = "· 没认出来"
+                                        // 整张扫不出来，多半是码占比太小 ——
+                                        // 让用户框出来再试，模块的有效像素能放大好几倍
+                                        offerCrop = true
                                     }
                                     scanning = false
                                 }
@@ -615,6 +638,44 @@ private fun ShotViewer(
                         .clickable(onClick = onClose)
                         .padding(horizontal = 20.dp, vertical = 12.dp)
                 )
+            }
+        }
+
+        if (cropping) {
+            CropScanOverlay(
+                bitmapWidth = bmp?.width ?: 0,
+                bitmapHeight = bmp?.height ?: 0,
+                busy = scanning,
+                result = cropNote,
+                onScan = { r ->
+                    scanning = true
+                    cropNote = null
+                    scope.launch {
+                        val hit = RegionScan.scan(
+                            item.file.path, r.left, r.top, r.right, r.bottom
+                        )
+                        if (hit != null) {
+                            Archive.updateSidecarCode(item.file, hit.value, hit.format)
+                            code = hit.value
+                            cropNote = hit.value
+                            offerCrop = false
+                            cropping = false
+                        } else {
+                            cropNote = "· 这块也没认出来，换个框法试试"
+                        }
+                        scanning = false
+                    }
+                },
+                onClose = { cropping = false }
+            ) {
+                bmp?.let {
+                    Image(
+                        bitmap = it.asImageBitmap(),
+                        contentDescription = null,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
             }
         }
 

@@ -51,6 +51,9 @@ dependencies {
 
     // 内置模型：不依赖 Play Services，车间断网也能扫。代价是 APK 大 2–3MB
     implementation("com.google.mlkit:barcode-scanning:17.3.0")
+    // 纯 Java，无 NDK。选它是因为它允许自定义 LuminanceSource ——
+    // ML Kit 只收 Bitmap，内部怎么转灰度控制不了
+    implementation("com.google.zxing:core:3.5.3")
     implementation("androidx.annotation:annotation-experimental:1.4.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
