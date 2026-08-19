@@ -286,6 +286,55 @@ object Archive {
         }.getOrDefault(false)
     }
 
+    /** 改随行 json 的某几个字段，其余原样保留 */
+    fun patchSidecar(raw: File, block: JSONObject.() -> Unit): Boolean {
+        val f = File(raw.parentFile, raw.nameWithoutExtension + ".json")
+        if (!f.exists()) return false
+        return runCatching {
+            val o = JSONObject(f.readText())
+            o.block()
+            f.writeText(o.toString())
+            true
+        }.getOrDefault(false)
+    }
+
+    /**
+     * 重拍替换。
+     *
+     * 旧的原图和随行 json 移到 replaced/ 留一份保险 —— 它不参与列表、
+     * 不参与导出、不参与恢复，只是拍砸了能回头。
+     * 新的接管旧的文件名，这样成片名和排序都不变。
+     */
+    fun replaceShot(old: File, new: File): Boolean = runCatching {
+        val dir = old.parentFile ?: return false
+        val bak = File(dir, "replaced").apply { if (!exists()) mkdirs() }
+        val stamp = System.currentTimeMillis()
+        val oldSide = File(dir, old.nameWithoutExtension + ".json")
+        val newSide = File(dir, new.nameWithoutExtension + ".json")
+
+        // 新的随行 json 要接管旧的成片文件名和目录，否则相册里会多出一张
+        val keep = runCatching { JSONObject(oldSide.readText()) }.getOrNull()
+        if (keep != null && newSide.exists()) {
+            runCatching {
+                val o = JSONObject(newSide.readText())
+                o.put("fileName", keep.optString("fileName"))
+                o.put("relativePath", keep.optString("relativePath"))
+                o.put("anchor", keep.optString("anchor", o.optString("anchor")))
+                o.put("rotation", keep.optInt("rotation", 0))
+                o.put("retakenAt", stamp)
+                newSide.writeText(o.toString())
+            }
+        }
+
+        old.renameTo(File(bak, "$stamp-" + old.name))
+        if (oldSide.exists()) oldSide.renameTo(File(bak, "$stamp-" + oldSide.name))
+
+        // 新的改名接管旧名字，缩略图网格里的位置和排序就不会跳
+        val target = File(dir, old.name)
+        val targetSide = File(dir, old.nameWithoutExtension + ".json")
+        new.renameTo(target) && (!newSide.exists() || newSide.renameTo(targetSide))
+    }.getOrDefault(false)
+
     fun sidecar(raw: File): JSONObject? = runCatching {
         val f = File(raw.parentFile, raw.nameWithoutExtension + ".json")
         if (f.exists()) JSONObject(f.readText()) else null

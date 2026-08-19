@@ -3,10 +3,10 @@ package com.sopcam
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
-import android.content.pm.PackageManager
-import android.location.LocationManager
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
+import android.location.LocationManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -16,6 +16,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.Camera
+import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.Preview
 import androidx.camera.view.PreviewView
@@ -27,44 +29,38 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
-import com.sopcam.capture.CameraBinder
 import com.sopcam.archive.Archive
 import com.sopcam.archive.Exporter
+import com.sopcam.archive.Gallery
 import com.sopcam.archive.Purge
 import com.sopcam.archive.Restorer
 import com.sopcam.archive.Thumbs
-import com.sopcam.crash.CrashLogger
+import com.sopcam.capture.CameraBinder
 import com.sopcam.capture.CapturePipeline
 import com.sopcam.capture.CodeAnalyzer
 import com.sopcam.capture.Codes
-import com.sopcam.capture.ShutterFeedback
-import com.sopcam.capture.ScannedCode
 import com.sopcam.capture.Optics
 import com.sopcam.capture.PendingShot
+import com.sopcam.capture.ScannedCode
+import com.sopcam.capture.ShutterFeedback
 import com.sopcam.capture.shoot
+import com.sopcam.crash.CrashLogger
 import com.sopcam.meta.ImageMeta
 import com.sopcam.sop.AppSettings
 import com.sopcam.sop.Catalog
+import com.sopcam.sop.ControllerModel
 import com.sopcam.sop.FaultType
 import com.sopcam.sop.Faults
-import com.sopcam.sop.ControllerModel
 import com.sopcam.sop.FileNaming
 import com.sopcam.sop.Session
 import com.sopcam.sop.SettingsStore
 import com.sopcam.sop.SopStep
 import com.sopcam.sop.SopStore
 import com.sopcam.sop.SopTemplate
-import androidx.camera.core.Camera
-import androidx.camera.core.ImageAnalysis
-import com.sopcam.ui.CameraScreen
-import com.sopcam.ui.DeleteScope
 import com.sopcam.ui.BatchAction
-import com.sopcam.ui.ProjectDetailScreen
-import com.sopcam.ui.ProjectsScreen
-import com.sopcam.ui.ShotItem
-import com.sopcam.ui.readShots
+import com.sopcam.ui.CameraScreen
 import com.sopcam.ui.CrashScreen
-import com.sopcam.ui.ScanScreen
+import com.sopcam.ui.DeleteScope
 import com.sopcam.ui.FlashMode
 import com.sopcam.ui.FocusSpot
 import com.sopcam.ui.FocusStatus
@@ -72,22 +68,29 @@ import com.sopcam.ui.OverlayPanel
 import com.sopcam.ui.PermissionGate
 import com.sopcam.ui.PickOption
 import com.sopcam.ui.PickerSheet
+import com.sopcam.ui.ProjectDetailScreen
+import com.sopcam.ui.ProjectsScreen
+import com.sopcam.ui.RetakeConfirmScreen
+import com.sopcam.ui.ScanScreen
 import com.sopcam.ui.SettingsScreen
 import com.sopcam.ui.SetupScreen
+import com.sopcam.ui.ShotItem
 import com.sopcam.ui.TemplateEditScreen
+import com.sopcam.ui.readShots
 import com.sopcam.watermark.Anchor
 import com.sopcam.watermark.OrientationController
 import com.sopcam.watermark.TopEdge
 import com.sopcam.watermark.WatermarkContent
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
-private enum class Screen { SETUP, TEMPLATE_EDIT, SETTINGS, CAMERA, SCAN, PROJECTS, PROJECT_DETAIL }
+private enum class Screen { SETUP, TEMPLATE_EDIT, SETTINGS, CAMERA, SCAN, PROJECTS, PROJECT_DETAIL, RETAKE_CONFIRM }
 
 /** 开工页上弹出的哪个选择器 */
 private enum class Sheet { NONE, MODEL, PLATFORM, FAULT, TEMPLATE }
@@ -139,6 +142,10 @@ class MainActivity : ComponentActivity() {
     private var exporting by mutableStateOf<String?>(null)
     private var openProject by mutableStateOf<Archive.Project?>(null)
     private var openShots by mutableStateOf<List<ShotItem>>(emptyList())
+    // 重拍：目标是哪一张、新拍的那张落在哪、新成片叫什么
+    private var retakeTarget by mutableStateOf<File?>(null)
+    private var retakeNew by mutableStateOf<File?>(null)
+    private var retakeNewPhoto by mutableStateOf<String?>(null)
     private var projectQuery by mutableStateOf("")
     private var statusFilter by mutableStateOf<Archive.Status?>(null)
     private var detailBusy by mutableStateOf<String?>(null)
@@ -210,6 +217,16 @@ class MainActivity : ComponentActivity() {
                 lifecycleScope.launch(Dispatchers.Main) {
                     queueDepth = (queueDepth - 1).coerceAtLeast(0)
                     lastSaved = saved.displayName
+                    // 重拍模式：这一张就是新拍的那张，捞出来去确认页
+                    retakeTarget?.let { old ->
+                        if (retakeNew == null) {
+                            retakeNew = Archive.shots(serialNo)
+                                .filter { it.absolutePath != old.absolutePath }
+                                .maxByOrNull { it.lastModified() }
+                            retakeNewPhoto = saved.displayName
+                            screen = Screen.RETAKE_CONFIRM
+                        }
+                    }
                 }
             },
             onArchiveIssue = { msg ->
@@ -251,6 +268,7 @@ class MainActivity : ComponentActivity() {
             // Compose 里后注册的优先，所以浮层会先被关掉。
             BackHandler(enabled = screen != Screen.SETUP) {
                 when (screen) {
+                    Screen.RETAKE_CONFIRM -> discardRetake()
                     Screen.PROJECT_DETAIL -> {
                         projects = Archive.list()
                         openProject = null
@@ -464,6 +482,18 @@ class MainActivity : ComponentActivity() {
                             }
                         },
                         onBatch = { items, act -> runBatch(p.serialNo, items, act) },
+                        onApplyEdit = { item, anchor, rotation ->
+                            applyShotEdit(p.serialNo, item, anchor, rotation)
+                        },
+                        onRetake = { item ->
+                            // 锁到这张的步骤上，拍完立刻回来，不要接着往下走
+                            retakeTarget = item.file
+                            retakeNew = null
+                            retakeNewPhoto = null
+                            activeSteps.indexOfFirst { it.order == item.stepOrder }
+                                .takeIf { it >= 0 }?.let { stepIndex = it }
+                            screen = Screen.CAMERA
+                        },
                         onEditShot = { item, headline, lines, name ->
                             Archive.updateSidecarWatermark(item.file, headline, lines, name)
                             openShots = readShots(p.serialNo)
@@ -496,6 +526,16 @@ class MainActivity : ComponentActivity() {
                             detailBusy = null
                             screen = Screen.PROJECTS
                         }
+                    )
+                }
+
+                Screen.RETAKE_CONFIRM -> retakeTarget?.let { old ->
+                    RetakeConfirmScreen(
+                        oldFile = old,
+                        newFile = retakeNew,
+                        busy = detailBusy,
+                        onConfirm = ::commitRetake,
+                        onCancel = ::discardRetake
                     )
                 }
 
@@ -724,6 +764,78 @@ class MainActivity : ComponentActivity() {
                     DeleteScope.ARCHIVE_ONLY -> "已删 ${serials.size} 个项目的原图"
                     DeleteScope.BOTH -> "已删除 ${serials.size} 个项目"
                 }
+            }
+        }
+    }
+
+    /**
+     * 保存水印位置和旋转角。
+     *
+     * 只改归档 json，然后用 overwrite 重烧一张覆盖相册里那张。
+     * 归档原图始终不动，所以怎么调都能改回去。
+     */
+    private fun applyShotEdit(serialNo: String, item: ShotItem, anchor: Anchor, rotation: Int) {
+        detailBusy = "应用中…"
+        lifecycleScope.launch(Dispatchers.IO) {
+            Archive.patchSidecar(item.file) {
+                put("anchor", anchor.name)
+                put("rotation", rotation)
+            }
+            val ok = Restorer.one(this@MainActivity, item.file, overwrite = true)
+            withContext(Dispatchers.Main) {
+                detailBusy = if (ok) "已应用到相册" else "重烧失败"
+                openShots = readShots(serialNo)
+            }
+        }
+    }
+
+    /** 确认换新：旧的进 replaced/，新的接管旧名字，再重烧覆盖相册 */
+    private fun commitRetake() {
+        val old = retakeTarget ?: return
+        val new = retakeNew ?: return
+        detailBusy = "替换中…"
+        lifecycleScope.launch(Dispatchers.IO) {
+            // 相机刚才为新照片另写了一张成片，名字跟旧的不同，先清掉
+            retakeNewPhoto?.let { name ->
+                Gallery.delete(
+                    this@MainActivity,
+                    Gallery.photosOf(serialNo).filter { it.name == name }
+                )
+            }
+            val ok = Archive.replaceShot(old, new)
+            if (ok) Restorer.one(this@MainActivity, old, overwrite = true)
+            withContext(Dispatchers.Main) {
+                detailBusy = null
+                retakeTarget = null
+                retakeNew = null
+                retakeNewPhoto = null
+                openShots = readShots(serialNo)
+                projects = Archive.list()
+                lastSaved = if (ok) "已替换" else "替换失败"
+                screen = Screen.PROJECT_DETAIL
+            }
+        }
+    }
+
+    /** 放弃新拍的：连它的归档和成片一起清掉，当作没拍过 */
+    private fun discardRetake() {
+        val new = retakeNew
+        detailBusy = "清理中…"
+        lifecycleScope.launch(Dispatchers.IO) {
+            new?.let { Purge.shot(it) }
+            retakeNewPhoto?.let { name ->
+                Gallery.delete(
+                    this@MainActivity,
+                    Gallery.photosOf(serialNo).filter { it.name == name }
+                )
+            }
+            withContext(Dispatchers.Main) {
+                detailBusy = null
+                retakeTarget = null
+                retakeNew = null
+                retakeNewPhoto = null
+                openShots = readShots(serialNo)
+                screen = Screen.PROJECT_DETAIL
             }
         }
     }

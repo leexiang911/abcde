@@ -3,6 +3,7 @@ package com.sopcam.archive
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import com.sopcam.meta.ImageMeta
 import com.sopcam.meta.MediaWriter
 import com.sopcam.watermark.Anchor
@@ -27,8 +28,20 @@ object Restorer {
     private val dayFmt = SimpleDateFormat("yyyyMMdd", Locale.US)
     private val timeFmt = SimpleDateFormat("HHmm", Locale.CHINA)
 
-    /** 恢复一张。返回是否成功 */
-    fun one(ctx: Context, raw: File, jpegQuality: Int = 92): Boolean = runCatching {
+    /**
+     * 恢复一张。返回是否成功。
+     *
+     * overwrite=false：相册里已经有同名的就跳过。批量恢复走这条，
+     *   不然 MediaStore 会自动改名成「xxx (1).jpg」，越恢复越多。
+     * overwrite=true：先删旧的再写。改水印位置、旋转、重拍都要走这条，
+     *   否则用户点了保存却看不到相册变化。
+     */
+    fun one(
+        ctx: Context,
+        raw: File,
+        jpegQuality: Int = 92,
+        overwrite: Boolean = false,
+    ): Boolean = runCatching {
         val side = Archive.sidecar(raw) ?: JSONObject()
         val serialNo = side.optString("serialNo").ifBlank { raw.parentFile?.name ?: "" }
         val at = side.optLong("capturedAt", raw.lastModified())
@@ -47,18 +60,30 @@ object Restorer {
         val anchor = runCatching { Anchor.valueOf(side.optString("anchor")) }
             .getOrDefault(Anchor.BOTTOM_LEFT)
 
-        // 当初关着水印拍的（没记下任何水印文字），恢复出来也应该是干净的图
-        if (headline != null || lines.isNotEmpty()) {
-            WatermarkRenderer.burnIn(bmp, WatermarkContent(headline, lines), anchor)
+        // 旋转在烧水印之前做：转完之后水印才会落在【成片画面】的角上，
+        // 而且文字始终正立 —— 「图转水印不动」就是这么来的。
+        // 归档原图本身不动，只在 json 里记角度，随时能改回去。
+        val rotation = ((side.optInt("rotation", 0) % 360) + 360) % 360
+        val canvas = if (rotation == 0) bmp else {
+            val m = Matrix().apply { postRotate(rotation.toFloat()) }
+            val turned = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
+            if (turned !== bmp) bmp.recycle()
+            turned
         }
 
-        val bytes = ByteArrayOutputStream(bmp.byteCount / 6).use { out ->
-            bmp.compress(Bitmap.CompressFormat.JPEG, jpegQuality, out)
+        // 当初关着水印拍的（没记下任何水印文字），恢复出来也应该是干净的图
+        if (headline != null || lines.isNotEmpty()) {
+            WatermarkRenderer.burnIn(canvas, WatermarkContent(headline, lines), anchor)
+        }
+
+        val bytes = ByteArrayOutputStream(canvas.byteCount / 6).use { out ->
+            canvas.compress(Bitmap.CompressFormat.JPEG, jpegQuality, out)
             out.toByteArray()
         }
-        val w = bmp.width
-        val h = bmp.height
-        bmp.recycle()
+        // 转 90/270 之后宽高互换，这两个值传错相册缩略图的比例就是歪的
+        val w = canvas.width
+        val h = canvas.height
+        canvas.recycle()
 
         val meta = ImageMeta(
             imageId = side.optString("imageId").ifBlank { UUID.randomUUID().toString() },
@@ -79,6 +104,12 @@ object Restorer {
 
         val display = side.optString("fileName").ifBlank { fallbackName(side, at) } + ".jpg"
         val path = side.optString("relativePath").ifBlank { fallbackPath(serialNo, at) }
+
+        val existing = Gallery.fileAt(path, display)
+        if (existing.exists()) {
+            if (!overwrite) return true      // 已经有了，不重复写
+            Gallery.delete(ctx, listOf(existing))
+        }
 
         MediaWriter.write(ctx, bytes, display, path, meta, w, h)
         true

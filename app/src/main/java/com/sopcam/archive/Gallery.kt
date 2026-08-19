@@ -33,6 +33,10 @@ object Gallery {
             ?.sortedBy { it.name } ?: emptyList()
     }
 
+    /** 按相对路径和文件名定位一张成片。用来覆盖重烧前先删掉旧的 */
+    fun fileAt(relativePath: String, display: String): File =
+        File(Environment.getExternalStorageDirectory(), relativePath.trim('/') + "/" + display)
+
     /**
      * 删照片。
      *

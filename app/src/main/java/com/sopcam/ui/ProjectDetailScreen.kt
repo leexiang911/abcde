@@ -5,9 +5,9 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -59,6 +59,7 @@ import com.sopcam.archive.Archive
 import com.sopcam.archive.Thumbs
 import com.sopcam.capture.Codes
 import com.sopcam.capture.RegionScan
+import com.sopcam.watermark.Anchor
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -102,6 +103,8 @@ fun ProjectDetailScreen(
     onDeleteProject: (DeleteScope) -> Unit,
     onBatch: (List<ShotItem>, BatchAction) -> Unit,
     onEditShot: (ShotItem, String, List<String>, String) -> Unit,
+    onApplyEdit: (ShotItem, Anchor, Int) -> Unit,
+    onRetake: (ShotItem) -> Unit,
     onBack: () -> Unit,
 ) {
     // 打开查看器时记的是下标而不是对象 —— 左右滑动要靠它在整个列表里走
@@ -110,6 +113,7 @@ fun ProjectDetailScreen(
     var picked by remember { mutableStateOf<Set<String>>(emptySet()) }
     var confirmBatchDelete by remember { mutableStateOf(false) }
     var pendingScope by remember { mutableStateOf<DeleteScope?>(null) }
+    var editingText by remember { mutableStateOf<ShotItem?>(null) }
     val selecting = picked.isNotEmpty()
 
     // 浮层各接管一层返回键。Compose 里后注册的优先，
@@ -281,8 +285,10 @@ fun ProjectDetailScreen(
                 ShotPager(
                     shots = shots,
                     startAt = start,
-                    onRestore = onRestoreOne,
-                    onEdit = onEditShot,
+                    busy = busy,
+                    onApply = onApplyEdit,
+                    onRetake = { onRetake(it); viewingAt = null },
+                    onEditText = { editingText = it },
                     onDelete = { item ->
                         onDeleteShot(item)
                         if (shots.size <= 1) viewingAt = null
@@ -305,6 +311,17 @@ fun ProjectDetailScreen(
                 onConfirm = {
                     pendingScope = null
                     onDeleteProject(scope)
+                }
+            )
+        }
+
+        editingText?.let { target ->
+            EditShotDialog(
+                item = target,
+                onCancel = { editingText = null },
+                onSave = { h, l, n ->
+                    editingText = null
+                    onEditShot(target, h, l, n)
                 }
             )
         }
@@ -434,276 +451,6 @@ private fun ThumbCell(
     }
 }
 
-@Composable
-private fun ShotViewer(
-    item: ShotItem,
-    indexLabel: String,
-    onRestore: () -> Unit,
-    onEdit: (String, List<String>, String) -> Unit,
-    onDelete: () -> Unit,
-    onClose: () -> Unit,
-) {
-    val ctx = LocalContext.current
-    var bmp by remember(item.file.absolutePath) { mutableStateOf<Bitmap?>(null) }
-    var confirming by remember { mutableStateOf(false) }
-    var code by remember(item.file.absolutePath) { mutableStateOf(item.codeValue) }
-    var scanning by remember(item.file.absolutePath) { mutableStateOf(false) }
-    var offerCrop by remember(item.file.absolutePath) { mutableStateOf(false) }
-    var cropping by remember(item.file.absolutePath) { mutableStateOf(false) }
-    var cropNote by remember(item.file.absolutePath) { mutableStateOf<String?>(null) }
-    val scope = rememberCoroutineScope()
-
-    LaunchedEffect(item.file.absolutePath) {
-        bmp = withContext(Dispatchers.IO) { Thumbs.full(item.file) }
-    }
-
-    var editing by remember(item.file.absolutePath) { mutableStateOf(false) }
-
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        bmp?.let {
-            Image(
-                bitmap = it.asImageBitmap(),
-                contentDescription = item.stepName,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxSize().padding(vertical = 80.dp)
-            )
-        } ?: Text("加载中…", color = Steel, fontSize = 13.sp)
-
-        Column(
-            Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 40.dp, start = 20.dp, end = 20.dp)
-                .fillMaxWidth()
-        ) {
-            Text(
-                buildString {
-                    if (item.stepOrder > 0) append("${item.stepOrder.toString().padStart(2, '0')} · ")
-                    append(item.stepName.ifBlank { "自由拍摄" })
-                },
-                color = Color.White,
-                fontSize = 15.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(Modifier.height(3.dp))
-            Text(
-                "$indexLabel  ·  ${shotTimeFmt.format(Date(item.at))}",
-                color = Steel,
-                fontSize = 12.sp
-            )
-            if (code.isNotBlank()) {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    code,
-                    color = Done,
-                    fontSize = 13.sp,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(Color(0x332CC38A))
-                        .clickable { copyText(ctx, code) }
-                        .padding(horizontal = 10.dp, vertical = 7.dp)
-                )
-                Spacer(Modifier.height(3.dp))
-                Text("点一下复制", color = Color(0xFF4A525C), fontSize = 10.sp)
-            }
-        }
-
-        Row(
-            Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 30.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            if (confirming) {
-                Text(
-                    "确认删除这张原图",
-                    color = Ink,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(Color(0xFFE86A5C))
-                        .clickable(onClick = onDelete)
-                        .padding(horizontal = 20.dp, vertical = 12.dp)
-                )
-                Text(
-                    "取消",
-                    color = Steel,
-                    fontSize = 14.sp,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .border(1.dp, Color(0xFF2A3037), RoundedCornerShape(6.dp))
-                        .clickable { confirming = false }
-                        .padding(horizontal = 20.dp, vertical = 12.dp)
-                )
-            } else {
-                if (offerCrop && !scanning) {
-                    Text(
-                        "框选重试",
-                        color = Ink,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Done)
-                            .clickable {
-                                cropNote = null
-                                cropping = true
-                            }
-                            .padding(horizontal = 20.dp, vertical = 12.dp)
-                    )
-                }
-                if (code.isBlank() && !offerCrop) {
-                    Text(
-                        if (scanning) "识别中…" else "扫码",
-                        color = Ink,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(if (scanning) Steel else Done)
-                            .clickable(enabled = !scanning) {
-                                scanning = true
-                                scope.launch {
-                                    // 拿全分辨率原图去扫，不是屏幕上这张缩过的
-                                    val hit = withContext(Dispatchers.IO) {
-                                        val full = BitmapFactory.decodeFile(item.file.path)
-                                        val r = full?.let { Codes.scan(it, thorough = true) }
-                                        full?.recycle()
-                                        r
-                                    }
-                                    if (hit != null) {
-                                        Archive.updateSidecarCode(item.file, hit.value, hit.format)
-                                        code = hit.value
-                                    } else {
-                                        code = "· 没认出来"
-                                        // 整张扫不出来，多半是码占比太小 ——
-                                        // 让用户框出来再试，模块的有效像素能放大好几倍
-                                        offerCrop = true
-                                    }
-                                    scanning = false
-                                }
-                            }
-                            .padding(horizontal = 20.dp, vertical = 12.dp)
-                    )
-                }
-                if (code.isNotBlank()) {
-                    Text(
-                        "清除码值",
-                        color = Steel,
-                        fontSize = 14.sp,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .border(1.dp, Color(0xFF2A3037), RoundedCornerShape(6.dp))
-                            .clickable {
-                                Archive.clearSidecarCode(item.file)
-                                code = ""
-                            }
-                            .padding(horizontal = 20.dp, vertical = 12.dp)
-                    )
-                }
-                Text(
-                    "改水印",
-                    color = Color.White,
-                    fontSize = 14.sp,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(Color(0xFF262D35))
-                        .clickable { editing = true }
-                        .padding(horizontal = 20.dp, vertical = 12.dp)
-                )
-                Text(
-                    "重烧回相册",
-                    color = Ink,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(Amber)
-                        .clickable(onClick = onRestore)
-                        .padding(horizontal = 20.dp, vertical = 12.dp)
-                )
-                Text(
-                    "删除这张",
-                    color = Color(0xFFE86A5C),
-                    fontSize = 14.sp,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .border(1.dp, Color(0x55E86A5C), RoundedCornerShape(6.dp))
-                        .clickable { confirming = true }
-                        .padding(horizontal = 20.dp, vertical = 12.dp)
-                )
-                Text(
-                    "关闭",
-                    color = Steel,
-                    fontSize = 14.sp,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .border(1.dp, Color(0xFF2A3037), RoundedCornerShape(6.dp))
-                        .clickable(onClick = onClose)
-                        .padding(horizontal = 20.dp, vertical = 12.dp)
-                )
-            }
-        }
-
-        if (cropping) {
-            CropScanOverlay(
-                bitmapWidth = bmp?.width ?: 0,
-                bitmapHeight = bmp?.height ?: 0,
-                busy = scanning,
-                result = cropNote,
-                onScan = { r ->
-                    scanning = true
-                    cropNote = null
-                    scope.launch {
-                        val hit = RegionScan.scan(
-                            item.file.path, r.left, r.top, r.right, r.bottom
-                        )
-                        if (hit != null) {
-                            Archive.updateSidecarCode(item.file, hit.value, hit.format)
-                            code = hit.value
-                            cropNote = hit.value
-                            offerCrop = false
-                            cropping = false
-                        } else {
-                            cropNote = "· 这块也没认出来，换个框法试试"
-                        }
-                        scanning = false
-                    }
-                },
-                onClose = { cropping = false }
-            ) {
-                bmp?.let {
-                    Image(
-                        bitmap = it.asImageBitmap(),
-                        contentDescription = null,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
-            }
-        }
-
-        if (editing) {
-            EditShotDialog(
-                item = item,
-                onCancel = { editing = false },
-                onSave = { h, l, n ->
-                    editing = false
-                    onEdit(h, l, n)
-                }
-            )
-        }
-    }
-}
-
-/**
- * 改水印文字和文件名。
- *
- * 改的是归档里那份随行 json，屏幕上和相册里的成片不会立刻变 ——
- * 要按"重烧回相册"才会按新内容重新生成一张。这样改错了也不至于毁掉已有成片。
- */
 @Composable
 private fun EditShotDialog(
     item: ShotItem,
@@ -966,12 +713,6 @@ private fun StatusPicker(current: Archive.Status, onPick: (Archive.Status) -> Un
     }
 }
 
-private fun copyText(ctx: Context, text: String) {
-    runCatching {
-        val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        cm.setPrimaryClip(ClipData.newPlainText("SOP Camera", text))
-    }
-}
 
 enum class BatchAction { SCAN, CLEAR_CODE, DELETE }
 
@@ -1051,8 +792,10 @@ private fun BatchButton(
 private fun ShotPager(
     shots: List<ShotItem>,
     startAt: Int,
-    onRestore: (ShotItem) -> Unit,
-    onEdit: (ShotItem, String, List<String>, String) -> Unit,
+    busy: String?,
+    onApply: (ShotItem, Anchor, Int) -> Unit,
+    onRetake: (ShotItem) -> Unit,
+    onEditText: (ShotItem) -> Unit,
     onDelete: (ShotItem) -> Unit,
     onClose: () -> Unit,
 ) {
@@ -1067,8 +810,10 @@ private fun ShotPager(
                 ShotViewer(
                     item = item,
                     indexLabel = "${page + 1} / ${shots.size}",
-                    onRestore = { onRestore(item) },
-                    onEdit = { h, l, n -> onEdit(item, h, l, n) },
+                    busy = busy,
+                    onApply = { a, r -> onApply(item, a, r) },
+                    onRetake = { onRetake(item) },
+                    onEditText = { onEditText(item) },
                     onDelete = { onDelete(item) },
                     onClose = onClose
                 )
