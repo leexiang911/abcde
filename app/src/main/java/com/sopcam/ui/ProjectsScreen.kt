@@ -238,6 +238,17 @@ private fun ProjectRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+            if (p.note.isNotBlank()) {
+                Spacer(Modifier.height(5.dp))
+                Text(
+                    p.note,
+                    color = Amber,
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
 
         Column(horizontalAlignment = Alignment.End) {

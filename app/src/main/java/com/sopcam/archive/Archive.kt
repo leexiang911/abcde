@@ -135,21 +135,19 @@ object Archive {
             if (!dir.exists()) dir.mkdirs()
             val f = File(dir, "project.json")
             val now = System.currentTimeMillis()
-            val created = if (f.exists()) {
-                runCatching { JSONObject(f.readText()).optLong("createdAt", now) }.getOrDefault(now)
-            } else now
-            // 状态是用户手动标的，拍照刷新档案时不能把它冲掉
-            val status = if (f.exists()) {
-                runCatching { JSONObject(f.readText()).optString("status") }.getOrDefault("")
-            } else ""
+            // 状态和备注是用户手填的，拍照刷新档案时不能冲掉
+            val prev = if (f.exists()) {
+                runCatching { JSONObject(f.readText()) }.getOrNull()
+            } else null
             f.writeText(
                 JSONObject()
                     .put("serialNo", serialNo)
                     .put("model", model)
                     .put("platform", platform)
                     .put("fault", fault)
-                    .put("status", status)
-                    .put("createdAt", created)
+                    .put("status", prev?.optString("status") ?: "")
+                    .put("note", prev?.optString("note") ?: "")
+                    .put("createdAt", prev?.optLong("createdAt", now) ?: now)
                     .put("updatedAt", now)
                     .toString()
             )
@@ -181,9 +179,20 @@ object Archive {
         val updatedAt: Long,
         val shotCount: Int,
         val status: Status = Status.NONE,
+        val note: String = "",
     ) {
         /** 搜索时拿来匹配的文本 */
-        fun haystack(): String = "$serialNo $model $platform $fault".lowercase()
+        fun haystack(): String = "$serialNo $model $platform $fault $note".lowercase()
+    }
+
+    /** 备注。写完立刻回列表可见，不用等下次拍照 */
+    fun setNote(serialNo: String, note: String) {
+        runCatching {
+            val f = File(projectDir(serialNo), "project.json")
+            f.parentFile?.mkdirs()
+            val o = if (f.exists()) JSONObject(f.readText()) else JSONObject().put("serialNo", serialNo)
+            f.writeText(o.put("note", note).put("updatedAt", System.currentTimeMillis()).toString())
+        }
     }
 
     fun setStatus(serialNo: String, status: Status) {
@@ -217,6 +226,7 @@ object Archive {
                     updatedAt = o.optLong("updatedAt", dir.lastModified()),
                     shotCount = shots,
                     status = Status.of(o.optString("status")),
+                    note = o.optString("note"),
                 )
             }
             ?.sortedByDescending { it.updatedAt }

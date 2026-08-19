@@ -93,6 +93,7 @@ fun ProjectDetailScreen(
     shots: List<ShotItem>,
     busy: String?,
     onSetStatus: (Archive.Status) -> Unit,
+    onSetNote: (String) -> Unit,
     onRestoreOne: (ShotItem) -> Unit,
     onRestoreAll: () -> Unit,
     onDeleteShot: (ShotItem) -> Unit,
@@ -159,6 +160,10 @@ fun ProjectDetailScreen(
             Spacer(Modifier.height(14.dp))
 
             StatusPicker(project.status, onSetStatus)
+
+            Spacer(Modifier.height(10.dp))
+
+            NoteBox(project.note, onSetNote)
 
             Spacer(Modifier.height(12.dp))
 
@@ -1001,6 +1006,95 @@ private fun ShotPager(
                     onClose = onClose
                 )
             }
+        }
+    }
+}
+
+/**
+ * 项目备注。
+ *
+ * 就地编辑，不弹窗 —— 备注是随手记的东西（"客户说间歇性重启"、"等配件"），
+ * 每次都要开关一个对话框太重。失焦即存。
+ */
+@Composable
+private fun NoteBox(note: String, onSave: (String) -> Unit) {
+    var editing by remember(note) { mutableStateOf(false) }
+    var text by remember(note) { mutableStateOf(note) }
+
+    if (!editing) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(Panel)
+                .clickable { editing = true }
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                note.ifBlank { "加个备注…" },
+                color = if (note.isBlank()) Color(0xFF4A525C) else Amber,
+                fontSize = 13.sp,
+                lineHeight = 19.sp,
+                modifier = Modifier.weight(1f)
+            )
+            Text("✎", color = Steel, fontSize = 14.sp)
+        }
+        return
+    }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(Panel)
+            .padding(14.dp)
+    ) {
+        BasicTextField(
+            value = text,
+            onValueChange = { text = it },
+            textStyle = TextStyle(color = Color.White, fontSize = 14.sp, lineHeight = 20.sp),
+            cursorBrush = SolidColor(Amber),
+            minLines = 2,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(6.dp))
+                .background(Ink)
+                .padding(horizontal = 10.dp, vertical = 10.dp)
+        )
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                "保存",
+                color = Ink,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Amber)
+                    .clickable {
+                        editing = false
+                        onSave(text.trim())
+                    }
+                    .padding(vertical = 11.dp)
+            )
+            Text(
+                "取消",
+                color = Steel,
+                fontSize = 14.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(6.dp))
+                    .border(1.dp, Color(0xFF2A3037), RoundedCornerShape(6.dp))
+                    .clickable {
+                        text = note
+                        editing = false
+                    }
+                    .padding(vertical = 11.dp)
+            )
         }
     }
 }

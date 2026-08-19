@@ -406,6 +406,11 @@ class MainActivity : ComponentActivity() {
                             openProject = p.copy(status = st)
                             projects = Archive.list()
                         },
+                        onSetNote = { note ->
+                            Archive.setNote(p.serialNo, note)
+                            projects = Archive.list()
+                            openProject = projects.firstOrNull { it.serialNo == p.serialNo } ?: p
+                        },
                         onRestoreOne = { item ->
                             detailBusy = "恢复中…"
                             lifecycleScope.launch(Dispatchers.IO) {
