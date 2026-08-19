@@ -113,9 +113,11 @@ fun CrashScreen(trace: String, onDismiss: () -> Unit) {
     }
 }
 
-private fun copyToClipboard(ctx: Context, text: String) {
+/** 复制到剪贴板。崩溃堆栈和照片里的码值都用它，所以是包内共用的 */
+/** 崩溃堆栈和大图里的码值都用它，标签保持通用 */
+internal fun copyToClipboard(ctx: Context, text: String) {
     runCatching {
         val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        cm.setPrimaryClip(ClipData.newPlainText("SopCam crash", text))
+        cm.setPrimaryClip(ClipData.newPlainText("SOP Camera", text))
     }
 }

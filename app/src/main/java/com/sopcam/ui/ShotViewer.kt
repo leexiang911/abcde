@@ -207,7 +207,7 @@ fun ShotViewer(
                     modifier = Modifier
                         .clip(RoundedCornerShape(6.dp))
                         .background(Color(0x332CC38A))
-                        .clickable { copyToClip(ctx, code) }
+                        .clickable { copyToClipboard(ctx, code) }
                         .padding(horizontal = 10.dp, vertical = 6.dp)
                 )
             }
