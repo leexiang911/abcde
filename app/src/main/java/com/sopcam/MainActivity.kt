@@ -13,6 +13,7 @@ import android.os.Bundle
 import android.provider.Settings
 import android.view.Surface
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.ImageCapture
@@ -242,6 +243,35 @@ class MainActivity : ComponentActivity() {
             if (!hasPermission) {
                 PermissionGate { requestPermissions() }
                 return@setContent
+            }
+
+            // 整个 App 只有一个 Activity，界面靠 enum 切换，
+            // 系统返回键并不知道这些层级 —— 不接管的话按一下就退出应用。
+            // 各界面内部的浮层（查看器、框选、多选）自己再注册一层，
+            // Compose 里后注册的优先，所以浮层会先被关掉。
+            BackHandler(enabled = screen != Screen.SETUP) {
+                when (screen) {
+                    Screen.PROJECT_DETAIL -> {
+                        projects = Archive.list()
+                        openProject = null
+                        screen = Screen.PROJECTS
+                    }
+                    Screen.PROJECTS -> {
+                        picked = emptySet()
+                        screen = Screen.SETUP
+                    }
+                    Screen.CAMERA -> {
+                        persist()
+                        camera?.cameraControl?.enableTorch(false)
+                        releaseFocus()
+                        screen = Screen.SETUP
+                    }
+                    Screen.SCAN -> {
+                        scannedCode = null
+                        screen = Screen.SETUP
+                    }
+                    else -> screen = Screen.SETUP
+                }
             }
             when (screen) {
                 Screen.SETUP -> {
@@ -641,7 +671,7 @@ class MainActivity : ComponentActivity() {
                             detailBusy = "识别中 ${i + 1} / ${items.size}"
                         }
                         val bmp = BitmapFactory.decodeFile(item.file.path)
-                        val found = bmp?.let { Codes.scan(it) }
+                        val found = bmp?.let { Codes.scan(it, thorough = true) }
                         bmp?.recycle()
                         if (found != null) {
                             Archive.updateSidecarCode(item.file, found.value, found.format)

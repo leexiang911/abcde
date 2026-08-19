@@ -149,13 +149,57 @@ object Codes {
      * ML Kit 的 Task 是异步的，这里挂起等它，好让流水线在写元数据之前拿到码值。
      */
     /**
-     * 级联识别：ML Kit 打头，扫不出来再交给 ZXing 的红通道那几趟。
+     * 级联识别。
      *
-     * 顺序是有意的 —— 大部分码 ML Kit 一步就过，速度不受影响；
-     * 只有难啃的（反色 Data Matrix、铜绿低反差）才多花两三百毫秒。
+     * 关键点：每一趟都还是喂给 ML Kit，只是喂的图不一样。
+     * ML Kit 的解码本身比 ZXing 强，它的短板只在「彩色怎么变灰度」这一步 ——
+     * 那一步我自己做了再给它，就补上了。ZXing 排在最后当兜底。
+     *
+     * thorough=false 用在拍照流水线上：只跑前两趟，不拖慢连拍。
+     * thorough=true 用在手动扫描：跑全套，慢几秒无所谓。
      */
-    suspend fun scan(bmp: Bitmap): ScannedCode? =
-        mlkit(bmp) ?: withContext(Dispatchers.Default) { ZxingDecoder.scan(bmp) }
+    suspend fun scan(bmp: Bitmap, thorough: Boolean = false): ScannedCode? {
+        mlkit(bmp)?.let { return it }
+
+        val variants = withContext(Dispatchers.Default) {
+            buildList {
+                // 红通道是这块板子的关键：铜色模块 vs 绿油底，红通道对比度翻倍
+                Preprocess.redChannel(bmp, invert = false)?.let { add(it) }
+                if (thorough) {
+                    // 浅模块深底，跟常规黑码白底相反，取反这趟专门对付极性
+                    Preprocess.redChannel(bmp, invert = true)?.let { add(it) }
+                    Preprocess.luma(bmp, invert = true)?.let { add(it) }
+                    Preprocess.luma(bmp, invert = false)?.let { add(it) }
+                }
+            }
+        }
+
+        try {
+            for (v in variants) {
+                mlkit(v)?.let { return it }
+            }
+
+            // 码占的像素太少时，放大能让二值化更容易找对模块边界
+            if (thorough && maxOf(bmp.width, bmp.height) < 1400) {
+                for (v in variants.take(2)) {
+                    val big = Preprocess.upscale(v, 2) ?: continue
+                    val hit = mlkit(big)
+                    if (big !== v) big.recycle()
+                    hit?.let { return it }
+                }
+            }
+
+            // ZXing 兜底。它的 Data Matrix 解码不如 ML Kit，只当最后一根稻草
+            if (thorough) {
+                withContext(Dispatchers.Default) {
+                    variants.firstNotNullOfOrNull { ZxingDecoder.scan(it) }
+                }?.let { return it }
+            }
+        } finally {
+            variants.forEach { if (it !== bmp) it.recycle() }
+        }
+        return null
+    }
 
     private suspend fun mlkit(bmp: Bitmap): ScannedCode? = suspendCancellableCoroutine { cont ->
         fun finish(v: ScannedCode?) {
@@ -186,8 +230,13 @@ object RegionScan {
 
     suspend fun scan(path: String, left: Int, top: Int, right: Int, bottom: Int): ScannedCode? =
         withContext(Dispatchers.IO) {
-            val crop = decodeRegion(path, left, top, right, bottom) ?: return@withContext null
-            val hit = Codes.scan(crop)
+            // 往外扩 18% 留静区。Data Matrix 和 QR 都要靠四周的空白定位，
+            // 框得贴边反而解不出来
+            val padX = ((right - left) * 0.18f).toInt()
+            val padY = ((bottom - top) * 0.18f).toInt()
+            val crop = decodeRegion(path, left - padX, top - padY, right + padX, bottom + padY)
+                ?: return@withContext null
+            val hit = Codes.scan(crop, thorough = true)
             crop.recycle()
             hit
         }

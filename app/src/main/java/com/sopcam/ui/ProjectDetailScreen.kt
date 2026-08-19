@@ -7,6 +7,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -110,6 +111,11 @@ fun ProjectDetailScreen(
     var confirmBatchDelete by remember { mutableStateOf(false) }
     var pendingScope by remember { mutableStateOf<DeleteScope?>(null) }
     val selecting = picked.isNotEmpty()
+
+    // 浮层各接管一层返回键。Compose 里后注册的优先，
+    // 所以顺序是：框选 → 查看器 → 多选 → 页面本身
+    BackHandler(enabled = viewingAt != null) { viewingAt = null }
+    BackHandler(enabled = picked.isNotEmpty()) { picked = emptySet() }
 
     // 删完图之后下标可能越界
     LaunchedEffect(shots.size) {
@@ -563,7 +569,7 @@ private fun ShotViewer(
                                     // 拿全分辨率原图去扫，不是屏幕上这张缩过的
                                     val hit = withContext(Dispatchers.IO) {
                                         val full = BitmapFactory.decodeFile(item.file.path)
-                                        val r = full?.let { Codes.scan(it) }
+                                        val r = full?.let { Codes.scan(it, thorough = true) }
                                         full?.recycle()
                                         r
                                     }

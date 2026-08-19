@@ -1,5 +1,6 @@
 package com.sopcam.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -91,6 +92,8 @@ fun CropScanOverlay(
         ).takeIf { abs(b.x - a.x) > 24f && abs(b.y - a.y) > 24f }
     }
 
+    BackHandler { onClose() }
+
     Box(
         Modifier
             .fillMaxSize()
@@ -141,7 +144,7 @@ fun CropScanOverlay(
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                "框得紧一点，只把码圈进去，别带太多背景",
+                "框住整个码，四周留一点空白 —— 太贴边反而认不出来",
                 color = Steel,
                 fontSize = 12.sp
             )
