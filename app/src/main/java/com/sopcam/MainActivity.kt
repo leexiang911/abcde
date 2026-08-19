@@ -30,6 +30,8 @@ import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.sopcam.archive.Archive
+import com.sopcam.archive.ExportSettings
+import com.sopcam.archive.ExportStore
 import com.sopcam.archive.Exporter
 import com.sopcam.archive.Gallery
 import com.sopcam.archive.Purge
@@ -140,6 +142,7 @@ class MainActivity : ComponentActivity() {
     private var projects by mutableStateOf<List<Archive.Project>>(emptyList())
     private var picked by mutableStateOf<Set<String>>(emptySet())
     private var exporting by mutableStateOf<String?>(null)
+    private var exportSettings by mutableStateOf(ExportSettings())
     private var openProject by mutableStateOf<Archive.Project?>(null)
     private var openShots by mutableStateOf<List<ShotItem>>(emptyList())
     // 重拍：目标是哪一张、新拍的那张落在哪、新成片叫什么
@@ -201,6 +204,7 @@ class MainActivity : ComponentActivity() {
         catalog = Catalog.load(this)
         faults = Faults.load(this)
         settings = SettingsStore.load(this)
+        exportSettings = ExportStore.load(this)
         SopStore.loadSession(this).let { s ->
             serialNo = s.serialNo
             modelId = s.modelId
@@ -433,6 +437,11 @@ class MainActivity : ComponentActivity() {
                     },
                     onExport = ::runExport,
                     onDelete = ::runBulkDelete,
+                    exportSettings = exportSettings,
+                    onExportSettings = {
+                        exportSettings = it
+                        ExportStore.save(this, it)
+                    },
                     onBack = {
                         picked = emptySet()
                         screen = Screen.SETUP
@@ -658,7 +667,7 @@ class MainActivity : ComponentActivity() {
         if (serials.isEmpty() || !opt.any) return
         exporting = "准备中…"
         lifecycleScope.launch(Dispatchers.IO) {
-            val zip = Exporter.export(serials, opt) { done, total ->
+            val zip = Exporter.export(serials, opt, exportSettings) { done, total ->
                 lifecycleScope.launch(Dispatchers.Main) { exporting = "打包中 $done / $total" }
             }
             withContext(Dispatchers.Main) {

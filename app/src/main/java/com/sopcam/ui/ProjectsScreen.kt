@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sopcam.archive.Archive
+import com.sopcam.archive.ExportSettings
 import com.sopcam.archive.Exporter
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -63,11 +64,15 @@ fun ProjectsScreen(
     onSelectAll: (List<String>) -> Unit,
     onExport: (Exporter.Options) -> Unit,
     onDelete: (DeleteScope) -> Unit,
+    exportSettings: ExportSettings,
+    onExportSettings: (ExportSettings) -> Unit,
     onBack: () -> Unit,
 ) {
     val sheetOpen = selected.isNotEmpty()
 
     // 搜索和状态筛选叠加。扫码搜索本质上就是把码填进搜索框，不用另做一套
+    var settingsOpen by remember { mutableStateOf(false) }
+
     val shown = remember(all, query, statusFilter) {
         val q = query.trim().lowercase()
         all.filter { p ->
@@ -109,6 +114,14 @@ fun ProjectsScreen(
                                 .padding(10.dp)
                         )
                     }
+                    Text(
+                        "⚙",
+                        color = Steel,
+                        fontSize = 17.sp,
+                        modifier = Modifier
+                            .clickable { settingsOpen = true }
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    )
                     Text(
                         "返回",
                         color = Amber,
@@ -161,9 +174,24 @@ fun ProjectsScreen(
             }
         }
 
+        if (settingsOpen) {
+            ExportSettingsSheet(
+                settings = exportSettings,
+                onChange = onExportSettings,
+                onDismiss = { settingsOpen = false }
+            )
+        }
+
         if (sheetOpen) {
             Box(Modifier.align(Alignment.BottomCenter)) {
-                ExportBar(selected.toList(), exporting, onExport, onDelete)
+                ExportBar(
+                    serials = selected.toList(),
+                    exporting = exporting,
+                    exportSettings = exportSettings,
+                    onOpenSettings = { settingsOpen = true },
+                    onExport = onExport,
+                    onDelete = onDelete
+                )
             }
         }
     }
@@ -263,6 +291,8 @@ private fun ProjectRow(
 private fun ExportBar(
     serials: List<String>,
     exporting: String?,
+    exportSettings: ExportSettings,
+    onOpenSettings: () -> Unit,
     onExport: (Exporter.Options) -> Unit,
     onDelete: (DeleteScope) -> Unit,
 ) {
@@ -302,7 +332,24 @@ private fun ExportBar(
             return@Column
         }
 
-        Text("导出", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("导出", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            // 压缩设置在这儿改最顺手 —— 要发之前才会想起这事
+            Text(
+                exportSettings.summary() + "  ⚙",
+                color = Amber,
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(5.dp))
+                    .background(Color(0x22FDCE04))
+                    .clickable(onClick = onOpenSettings)
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            )
+        }
         Spacer(Modifier.height(12.dp))
 
         ExportButton(
