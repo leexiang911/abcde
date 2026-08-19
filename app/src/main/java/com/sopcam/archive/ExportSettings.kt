@@ -33,6 +33,10 @@ data class ExportSettings(
     val format: ExportFormat = ExportFormat.JPEG,
     /** 压缩后重新注入 XMP。只有 JPEG 能做 —— WebP 要另写 RIFF chunk 写入器 */
     val keepMetadata: Boolean = true,
+    /** 包里带一份 HTML 报表和 report.json */
+    val htmlReport: Boolean = true,
+    /** Excel 报表，下一轮做 */
+    val excelReport: Boolean = false,
 ) {
     val compresses: Boolean get() = quality in 1..99
 
@@ -48,6 +52,8 @@ data class ExportSettings(
         .put("quality", quality)
         .put("format", format.name)
         .put("keepMetadata", keepMetadata)
+        .put("htmlReport", htmlReport)
+        .put("excelReport", excelReport)
 
     companion object {
         val LEVELS = listOf(100, 95, 80, 75, 65, 60, 50)
@@ -56,6 +62,8 @@ data class ExportSettings(
             quality = o.optInt("quality", 100).coerceIn(1, 100),
             format = ExportFormat.of(o.optString("format")),
             keepMetadata = o.optBoolean("keepMetadata", true),
+            htmlReport = o.optBoolean("htmlReport", true),
+            excelReport = false,   // 还没实现，读到 true 也当 false
         )
     }
 }

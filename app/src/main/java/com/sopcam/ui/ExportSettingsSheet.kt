@@ -119,48 +119,37 @@ fun ExportSettingsSheet(
 
             if (settings.compresses) {
                 Spacer(Modifier.height(16.dp))
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Ink)
-                        .clickable(enabled = settings.metadataPossible) {
-                            onChange(settings.copy(keepMetadata = !settings.keepMetadata))
-                        }
-                        .padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f).padding(end = 12.dp)) {
-                        Text("保留元数据", color = Color.White, fontSize = 14.sp)
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            if (settings.metadataPossible)
-                                "压缩会抹掉 EXIF 和 XMP，这里把 XMP 重新塞回去"
-                            else
-                                "WebP 不支持，选 JPEG 才能保留",
-                            color = Steel,
-                            fontSize = 11.sp,
-                            lineHeight = 16.sp
-                        )
-                    }
-                    val on = settings.keepMetadata && settings.metadataPossible
-                    Box(
-                        Modifier
-                            .size(44.dp, 26.dp)
-                            .clip(RoundedCornerShape(13.dp))
-                            .background(if (on) Amber else Color(0xFF2A3037)),
-                        contentAlignment = if (on) Alignment.CenterEnd else Alignment.CenterStart
-                    ) {
-                        Box(
-                            Modifier
-                                .padding(horizontal = 3.dp)
-                                .size(20.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(if (on) Ink else Steel)
-                        )
-                    }
-                }
+                ToggleRow(
+                    title = "保留元数据",
+                    desc = if (settings.metadataPossible)
+                        "压缩会抹掉 EXIF 和 XMP，这里把 XMP 重新塞回去"
+                    else
+                        "WebP 不支持，选 JPEG 才能保留",
+                    checked = settings.keepMetadata && settings.metadataPossible,
+                    enabled = settings.metadataPossible,
+                ) { onChange(settings.copy(keepMetadata = it)) }
             }
+
+            Spacer(Modifier.height(20.dp))
+            Text("报表", color = Color.White, fontSize = 14.sp)
+            Spacer(Modifier.height(8.dp))
+
+            ToggleRow(
+                title = "HTML 报表",
+                desc = "包里带一份网页报表和 report.json，双击就能看，" +
+                    "数值可以直接在页面上填，填完复制成表格粘进系统",
+                checked = settings.htmlReport,
+                enabled = true,
+            ) { onChange(settings.copy(htmlReport = it)) }
+
+            Spacer(Modifier.height(6.dp))
+
+            ToggleRow(
+                title = "Excel 报表",
+                desc = "下一轮做",
+                checked = false,
+                enabled = false,
+            ) { }
 
             Spacer(Modifier.height(16.dp))
             Text(
@@ -241,5 +230,54 @@ private fun FormatRow(
             )
         }
         if (active) Text("✓", color = Amber, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun ToggleRow(
+    title: String,
+    desc: String,
+    checked: Boolean,
+    enabled: Boolean,
+    onToggle: (Boolean) -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (enabled) Ink else Color(0xFF1A1F25))
+            .clickable(enabled = enabled) { onToggle(!checked) }
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(
+                title,
+                color = if (enabled) Color.White else Color(0xFF3A424B),
+                fontSize = 14.sp
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                desc,
+                color = if (enabled) Steel else Color(0xFF343B44),
+                fontSize = 11.sp,
+                lineHeight = 16.sp
+            )
+        }
+        Box(
+            Modifier
+                .size(44.dp, 26.dp)
+                .clip(RoundedCornerShape(13.dp))
+                .background(if (checked) Amber else Color(0xFF2A3037)),
+            contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart
+        ) {
+            Box(
+                Modifier
+                    .padding(horizontal = 3.dp)
+                    .size(20.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(if (checked) Ink else Steel)
+            )
+        }
     }
 }

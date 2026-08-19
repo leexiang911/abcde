@@ -98,6 +98,22 @@ object Exporter {
                         }
                     }
                 }
+
+                if (settings.htmlReport) {
+                    val ext = if (settings.compresses && settings.format == ExportFormat.WEBP)
+                        "webp" else "jpg"
+                    val manifest = Report.manifest(serials, ext, opt.watermarked)
+                    putBytes(
+                        zip, "报表.html",
+                        Report.html(manifest).toByteArray(Charsets.UTF_8), out
+                    )
+                    // 跟 HTML 里内嵌的是同一份。冗余几十 KB，
+                    // 但以后写浏览器插件或脚本直接读它就行，不用从 HTML 里抠
+                    putBytes(
+                        zip, "report.json",
+                        manifest.toString(2).toByteArray(Charsets.UTF_8), out
+                    )
+                }
             }
         }.onFailure {
             out.delete()
