@@ -102,4 +102,83 @@ object Preprocess {
             true
         )
     }.getOrNull()
+
+/**
+ * 灰度膨胀 —— 取邻域最大值，让相邻的亮点连成片。
+ *
+ * 这是对付**点阵式 Data Matrix** 的关键。板子上的码不是实心方块，
+ * 每个模块是一个独立圆点，模块之间露着底色。标准解码器找 Data Matrix
+ * 靠的是左边和下边那两条连续的 L 定位边框，而点阵的边缘是断的 ——
+ * 检测器根本找不到直线，后面的解码全白搭。
+ *
+ * 膨胀之后圆点糊成一片，L 边框变回连续直线，解码器就能认了。
+ *
+ * 拆成横竖两趟：邻域最大值是可分离的，复杂度从 O(w·h·k²) 降到 O(w·h·k)。
+ * 半径要跟模块大小匹配：模块约 13px 时用 2，约 21px 时用 4。
+ * 不知道模块多大，所以两个都试。
+ */
+    /**
+     * 灰度膨胀 —— 取邻域最大值，让相邻的亮点连成片。
+     *
+     * 这是对付**点阵式 Data Matrix** 的关键。板子上的码不是实心方块，
+     * 每个模块是一个独立圆点，模块之间露着底色。标准解码器找 Data Matrix
+     * 靠的是左边和下边那两条连续的 L 定位边框，而点阵的边缘是断的 ——
+     * 检测器根本找不到直线，后面的解码全白搭。
+     *
+     * 膨胀之后圆点糊成一片，L 边框变回连续直线，解码器就能认了。
+     *
+     * 拆成横竖两趟：邻域最大值可分离，复杂度从 O(w·h·k²) 降到 O(w·h·k)。
+     * 半径要跟模块大小匹配：模块约 13px 用 2，约 21px 用 4。
+     * 事先不知道模块多大，所以两个都试。
+     */
+    fun dilate(src: Bitmap, radius: Int): Bitmap? = runCatching {
+        val w = src.width
+        val h = src.height
+        if (w <= 0 || h <= 0 || radius <= 0) return null
+
+        val gray = ByteArray(w * h)
+        val line = IntArray(w)
+        for (y in 0 until h) {
+            src.getPixels(line, 0, w, 0, y, w, 1)
+            val base = y * w
+            for (x in 0 until w) gray[base + x] = ((line[x] shr 16) and 0xFF).toByte()
+        }
+
+        // 横向一趟
+        val tmp = ByteArray(w * h)
+        for (y in 0 until h) {
+            val base = y * w
+            for (x in 0 until w) {
+                var m = 0
+                var i = maxOf(0, x - radius)
+                val end = minOf(w - 1, x + radius)
+                while (i <= end) {
+                    val v = gray[base + i].toInt() and 0xFF
+                    if (v > m) m = v
+                    i++
+                }
+                tmp[base + x] = m.toByte()
+            }
+        }
+
+        // 纵向一趟
+        val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val row = IntArray(w)
+        for (y in 0 until h) {
+            val top = maxOf(0, y - radius)
+            val bot = minOf(h - 1, y + radius)
+            for (x in 0 until w) {
+                var m = 0
+                var yy = top
+                while (yy <= bot) {
+                    val v = tmp[yy * w + x].toInt() and 0xFF
+                    if (v > m) m = v
+                    yy++
+                }
+                row[x] = (0xFF shl 24) or (m shl 16) or (m shl 8) or m
+            }
+            out.setPixels(row, 0, w, 0, y, w, 1)
+        }
+        out
+    }.getOrNull()
 }

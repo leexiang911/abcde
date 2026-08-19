@@ -151,54 +151,58 @@ object Codes {
     /**
      * 级联识别。
      *
-     * 关键点：每一趟都还是喂给 ML Kit，只是喂的图不一样。
-     * ML Kit 的解码本身比 ZXing 强，它的短板只在「彩色怎么变灰度」这一步 ——
-     * 那一步我自己做了再给它，就补上了。ZXing 排在最后当兜底。
+     * 每一趟都还是喂给 ML Kit，只是喂的图不一样 —— ML Kit 的解码本身比 ZXing 强，
+     * 它的短板只在「彩色怎么变灰度」这一步，那一步我自己做了再给它就补上了。
      *
-     * thorough=false 用在拍照流水线上：只跑前两趟，不拖慢连拍。
-     * thorough=true 用在手动扫描：跑全套，慢几秒无所谓。
+     * 变体是**逐个生成、用完就回收**的，不一次全建出来：
+     * 一张 2400x1800 的 ARGB 位图占 17MB，同时握着七八张必 OOM。
+     *
+     * thorough=false 用在拍照流水线：只跑前两趟，不拖慢连拍。
+     * thorough=true 用在手动和批量扫描：跑全套，慢几秒无所谓。
      */
     suspend fun scan(bmp: Bitmap, thorough: Boolean = false): ScannedCode? {
         mlkit(bmp)?.let { return it }
 
-        val variants = withContext(Dispatchers.Default) {
-            buildList {
-                // 红通道是这块板子的关键：铜色模块 vs 绿油底，红通道对比度翻倍
-                Preprocess.redChannel(bmp, invert = false)?.let { add(it) }
-                if (thorough) {
-                    // 浅模块深底，跟常规黑码白底相反，取反这趟专门对付极性
-                    Preprocess.redChannel(bmp, invert = true)?.let { add(it) }
-                    Preprocess.luma(bmp, invert = true)?.let { add(it) }
-                    Preprocess.luma(bmp, invert = false)?.let { add(it) }
-                }
+        // 预处理都在缩过的图上做，控制内存和耗时。
+        // 2400 长边下模块还有约 13px，够解码，不必守着 4000
+        val base = withContext(Dispatchers.Default) { Preprocess.capped(bmp, 2400) } ?: bmp
+
+        val makers: List<() -> Bitmap?> = buildList {
+            // 红通道：铜色模块 vs 绿油底，红通道对比度比标准灰度翻倍
+            add { Preprocess.redChannel(base, invert = false) }
+            if (thorough) {
+                // 膨胀：把点阵式 Data Matrix 的独立圆点连成实心块，
+                // 让断掉的 L 定位边框恢复成连续直线。这一趟才是点阵码的关键
+                add { Preprocess.redChannel(base, invert = false)?.dilated(2) }
+                add { Preprocess.redChannel(base, invert = false)?.dilated(4) }
+                // 极性相反的码：先取反再膨胀
+                add { Preprocess.redChannel(base, invert = true)?.dilated(2) }
+                add { Preprocess.redChannel(base, invert = true) }
+                add { Preprocess.luma(base, invert = false)?.dilated(2) }
+                add { Preprocess.luma(base, invert = true) }
             }
         }
 
         try {
-            for (v in variants) {
-                mlkit(v)?.let { return it }
-            }
-
-            // 码占的像素太少时，放大能让二值化更容易找对模块边界
-            if (thorough && maxOf(bmp.width, bmp.height) < 1400) {
-                for (v in variants.take(2)) {
-                    val big = Preprocess.upscale(v, 2) ?: continue
-                    val hit = mlkit(big)
-                    if (big !== v) big.recycle()
-                    hit?.let { return it }
-                }
-            }
-
-            // ZXing 兜底。它的 Data Matrix 解码不如 ML Kit，只当最后一根稻草
-            if (thorough) {
-                withContext(Dispatchers.Default) {
-                    variants.firstNotNullOfOrNull { ZxingDecoder.scan(it) }
-                }?.let { return it }
+            for (make in makers) {
+                val v = withContext(Dispatchers.Default) { make() } ?: continue
+                val hit = mlkit(v) ?: if (thorough) {
+                    withContext(Dispatchers.Default) { ZxingDecoder.scan(v) }
+                } else null
+                v.recycle()
+                if (hit != null) return hit
             }
         } finally {
-            variants.forEach { if (it !== bmp) it.recycle() }
+            if (base !== bmp) base.recycle()
         }
         return null
+    }
+
+    /** 膨胀完把中间那张也回收掉，别让它跟着变体一起漏出去 */
+    private fun Bitmap.dilated(radius: Int): Bitmap? {
+        val out = Preprocess.dilate(this, radius)
+        recycle()
+        return out
     }
 
     private suspend fun mlkit(bmp: Bitmap): ScannedCode? = suspendCancellableCoroutine { cont ->
