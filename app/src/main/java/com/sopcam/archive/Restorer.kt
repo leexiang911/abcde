@@ -59,7 +59,7 @@ object Restorer {
         val bmp = BitmapFactory.decodeFile(
             raw.path,
             BitmapFactory.Options().apply { inMutable = true }
-        ) ?: return false
+        ) ?: return Outcome.FAILED
 
         val lines = side.optJSONArray("lines")?.let { arr ->
             (0 until arr.length()).map { arr.optString(it) }
