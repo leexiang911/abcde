@@ -89,6 +89,8 @@ import java.util.Date
 import java.util.Locale
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -151,7 +153,12 @@ class MainActivity : ComponentActivity() {
     private var retakeNewPhoto by mutableStateOf<String?>(null)
     private var projectQuery by mutableStateOf("")
     private var statusFilter by mutableStateOf<Archive.Status?>(null)
+    // busy = 正在忙，按钮要禁用；note = 干完的提示，几秒后自己消失，不禁用任何东西。
+    // 以前两者共用一个字段，完成提示写进去就没人清了，按钮从此点不动 ——
+    // 得退出重进才恢复。
     private var detailBusy by mutableStateOf<String?>(null)
+    private var detailNote by mutableStateOf<String?>(null)
+    private var noteJob: Job? = null
     private var scanForSearch = false
     private lateinit var analysis: ImageAnalysis
     private var scannedCode by mutableStateOf<ScannedCode?>(null)
@@ -458,6 +465,7 @@ class MainActivity : ComponentActivity() {
                             openShots = readShots(p.serialNo)
                         },
                         busy = detailBusy,
+                        note = detailNote,
                         onSetStatus = { st ->
                             Archive.setStatus(p.serialNo, st)
                             openProject = p.copy(status = st)
@@ -471,22 +479,40 @@ class MainActivity : ComponentActivity() {
                         onRestoreOne = { item ->
                             detailBusy = "恢复中…"
                             lifecycleScope.launch(Dispatchers.IO) {
-                                val ok = Restorer.one(this@MainActivity, item.file)
+                                val outcome = Restorer.one(
+                                    this@MainActivity, item.file, overwrite = true
+                                )
                                 withContext(Dispatchers.Main) {
-                                    detailBusy = if (ok) "已重烧回相册" else "恢复失败"
+                                    detailBusy = null
+                                    showNote(
+                                        when (outcome) {
+                                            Restorer.Outcome.WRITTEN -> "已重烧回相册"
+                                            Restorer.Outcome.SKIPPED -> "相册里已经有这张了"
+                                            Restorer.Outcome.FAILED -> "恢复失败"
+                                        }
+                                    )
                                 }
                             }
                         },
                         onRestoreAll = {
                             detailBusy = "准备中…"
                             lifecycleScope.launch(Dispatchers.IO) {
-                                val ok = Restorer.project(this@MainActivity, p.serialNo) { i, n ->
+                                val r = Restorer.project(this@MainActivity, p.serialNo) { i, n ->
                                     lifecycleScope.launch(Dispatchers.Main) {
                                         detailBusy = "恢复中 $i / $n"
                                     }
                                 }
                                 withContext(Dispatchers.Main) {
-                                    detailBusy = "已恢复 $ok 张到相册"
+                                    detailBusy = null
+                                    // 写入、跳过、失败分开报 —— 以前跳过也算成功，
+                                    // 数字看着对，相册里却少几张
+                                    showNote(
+                                        buildString {
+                                            append("恢复 ${r.written} 张")
+                                            if (r.skipped > 0) append("，跳过 ${r.skipped} 张已有的")
+                                            if (r.failed > 0) append("，失败 ${r.failed} 张")
+                                        }
+                                    )
                                 }
                             }
                         },
@@ -520,7 +546,8 @@ class MainActivity : ComponentActivity() {
                             // 只删了相册的话项目还在，留在详情页反而合理
                             if (scope == DeleteScope.GALLERY_ONLY) {
                                 openShots = readShots(p.serialNo)
-                                detailBusy = "相册照片已删，原图还在，随时能重烧"
+                                detailBusy = null
+                                showNote("相册照片已删，原图还在，随时能重烧")
                             } else {
                                 picked = picked - p.serialNo
                                 openProject = null
@@ -742,11 +769,13 @@ class MainActivity : ComponentActivity() {
                 detailBusy = null
                 openShots = readShots(serialNo)
                 projects = Archive.list()
-                lastSaved = when (act) {
-                    BatchAction.SCAN -> "识别出 $hit / ${items.size} 张"
-                    BatchAction.CLEAR_CODE -> "已清除 $hit 张的码值"
-                    BatchAction.DELETE -> "已删除 $hit 张"
-                }
+                showNote(
+                    when (act) {
+                        BatchAction.SCAN -> "识别出 $hit / ${items.size} 张"
+                        BatchAction.CLEAR_CODE -> "已清除 $hit 张的码值"
+                        BatchAction.DELETE -> "已删除 $hit 张"
+                    }
+                )
             }
         }
     }
@@ -790,9 +819,11 @@ class MainActivity : ComponentActivity() {
                 put("anchor", anchor.name)
                 put("rotation", rotation)
             }
-            val ok = Restorer.one(this@MainActivity, item.file, overwrite = true)
+            val ok = Restorer.one(this@MainActivity, item.file, overwrite = true) ==
+                Restorer.Outcome.WRITTEN
             withContext(Dispatchers.Main) {
-                detailBusy = if (ok) "已应用到相册" else "重烧失败"
+                detailBusy = null
+                showNote(if (ok) "已应用到相册" else "重烧失败")
                 openShots = readShots(serialNo)
             }
         }
@@ -813,6 +844,7 @@ class MainActivity : ComponentActivity() {
             }
             val ok = Archive.replaceShot(old, new)
             if (ok) Restorer.one(this@MainActivity, old, overwrite = true)
+
             withContext(Dispatchers.Main) {
                 detailBusy = null
                 retakeTarget = null
@@ -846,6 +878,17 @@ class MainActivity : ComponentActivity() {
                 openShots = readShots(serialNo)
                 screen = Screen.PROJECT_DETAIL
             }
+        }
+    }
+
+    /** 提示只是提示，2.5 秒后自动收走，不该挡住任何操作 */
+    private fun showNote(text: String?) {
+        detailNote = text
+        noteJob?.cancel()
+        if (text == null) return
+        noteJob = lifecycleScope.launch {
+            delay(2500)
+            detailNote = null
         }
     }
 

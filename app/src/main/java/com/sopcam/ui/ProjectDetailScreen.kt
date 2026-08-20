@@ -97,6 +97,7 @@ fun ProjectDetailScreen(
     busy: String?,
     onSetStatus: (Archive.Status) -> Unit,
     onSetNote: (String) -> Unit,
+    note: String?,
     onRestoreOne: (ShotItem) -> Unit,
     onRestoreAll: () -> Unit,
     onDeleteShot: (ShotItem) -> Unit,
@@ -178,10 +179,11 @@ fun ProjectDetailScreen(
 
             Spacer(Modifier.height(12.dp))
 
-            if (busy != null) {
+            // 忙碌用琥珀，完成提示用绿色 —— 一个是"等着"，一个是"好了"
+            (busy ?: note)?.let { msg ->
                 Text(
-                    busy,
-                    color = Amber,
+                    msg,
+                    color = if (busy != null) Amber else Done,
                     fontSize = 13.sp,
                     modifier = Modifier
                         .padding(horizontal = 20.dp)
