@@ -40,18 +40,35 @@ object Report {
 
         serials.forEach { sn ->
             val meta = index[sn]
-            val steps = LinkedHashMap<Int, JSONObject>()
+            // 分组键是「序号 + 步骤名」，不能只用序号 ——
+            // 同一个控制器上用过两套流程时，两套的序号都从 1 开始，
+            // 只按序号分会把「01 松开obc_can_H波形」并进「01 插入obc控制板不工作」里，
+            // 标题还取先遇到的那个，看起来就是照片跑错了栏目
+            val steps = LinkedHashMap<String, JSONObject>()
 
             Archive.shots(sn).forEach { raw ->
                 val side = Archive.sidecar(raw) ?: JSONObject()
                 val order = side.optInt("stepOrder", 0)
+                // 认文件名，不认 stepName。
+                //
+                // 用户在大图里「改水印文字 / 改文件名」时，改的是 fileName，
+                // stepName 还停在拍摄那一刻的步骤上。按 stepName 分组的话，
+                // 改过名的照片会被塞回原来那一栏 —— 两套流程的 01 就撞在一起了。
+                // 文件名是用户亲手改的、也是他在界面上看到的，那才是真的。
+                val fileStem = side.optString("fileName").ifBlank { raw.nameWithoutExtension }
+                val name = labelOf(fileStem)
+                    .ifBlank { side.optString("stepName") }
+                    .ifBlank { "自由拍摄" }
+                val key = "$order|$name"
 
-                val group = steps.getOrPut(order) {
+                val group = steps.getOrPut(key) {
                     JSONObject()
                         .put("order", order)
-                        .put("name", side.optString("stepName").ifBlank { "自由拍摄" })
+                        .put("name", name)
+                        .put("firstAt", side.optLong("capturedAt", raw.lastModified()))
                         .put("refDes", side.optString("stepRefDes"))
                         .put("shots", JSONArray())
+                        .put("codes", JSONArray())
                         .put("value", "")
                         .put("unit", "")
                         .put("verdict", "")
@@ -75,11 +92,24 @@ object Report {
                         .put("time", shotFmt.format(Date(side.optLong("capturedAt", raw.lastModified()))))
                         .put("code", side.optString("codeValue"))
                 )
+
+                // 码值汇到组上，报表右栏直接显示，不用在图底下找
+                val code = side.optString("codeValue")
+                if (code.isNotBlank()) {
+                    val arr = group.getJSONArray("codes")
+                    val has = (0 until arr.length()).any { arr.optString(it) == code }
+                    if (!has) arr.put(code)
+                }
             }
 
-            // 自由拍摄（序号 0）排到最后，按流程走的那些在前
+            // 自由拍摄（序号 0）排到最后；两组序号相同时按最早那张的时间排，
+            // 这样顺序跟实际干活的先后一致
             val ordered = steps.values.sortedWith(
-                compareBy({ if (it.optInt("order") == 0) 1 else 0 }, { it.optInt("order") })
+                compareBy(
+                    { if (it.optInt("order") == 0) 1 else 0 },
+                    { it.optInt("order") },
+                    { it.optLong("firstAt") },
+                )
             )
 
             projects.put(
@@ -109,6 +139,20 @@ object Report {
         return TEMPLATE
             .replace("__TITLE__", titleOf(manifest))
             .replace("__DATA__", safe)
+    }
+
+    /**
+     * 从文件名里还原出这张照片"是什么"。
+     *
+     * 文件名的形状是 `序号_[位号_]名称[_重复序号]_时分秒`，
+     * 从两头剥掉机器加的部分，剩下的就是人写的那截。
+     */
+    private fun labelOf(stem: String): String {
+        var t = stem
+        t = t.replace(Regex("_\\d{4,6}$"), "")   // 尾巴上的时分秒
+        t = t.replace(Regex("_\\d{1,2}$"), "")   // 同一分钟内连拍的重复序号
+        t = t.replace(Regex("^\\d{1,3}_"), "")   // 开头的步骤号
+        return t.replace('_', '·').replace("·", " · ").trim()
     }
 
     private fun titleOf(m: JSONObject): String {
@@ -182,7 +226,15 @@ button.go{background:var(--mark);border-color:var(--mark);font-weight:600}
 .node.unsure{background:var(--unsure);border-color:var(--unsure);color:#fff}
 
 .body{padding:22px 22px 22px 4px;min-width:0}
-.title{font-size:16.5px;font-weight:600}
+.title{font-size:16.5px;font-weight:600;cursor:pointer;user-select:none;
+  display:flex;align-items:center;gap:8px}
+.title:hover{color:#000}
+.caret{font-family:var(--mono);font-size:11px;color:var(--mute);
+  transition:transform .15s;display:inline-block}
+.step.shut .caret{transform:rotate(-90deg)}
+.step.shut .shots,.step.shut .refdes{display:none}
+.step.shut .body{padding-bottom:18px}
+.count{font-family:var(--mono);font-size:11px;color:var(--mute);font-weight:400}
 .refdes{font-family:var(--mono);font-size:12px;color:var(--mute);margin-top:3px}
 .shots{display:flex;flex-wrap:wrap;gap:10px;margin-top:13px}
 figure{margin:0;width:172px}
@@ -196,6 +248,15 @@ figcaption{font-family:var(--mono);font-size:10.5px;color:var(--mute);
 .code:hover{border-color:var(--ink)}
 
 .data{padding:22px 0 22px 20px;border-left:1px solid var(--rule)}
+/* 识别值：机器从图里读出来的，不给编辑，点一下复制 */
+.read{margin-bottom:14px}
+.read .val{display:block;font-family:var(--mono);font-size:13px;
+  padding:7px 10px;background:#fff;border:1px solid var(--rule);
+  border-left:3px solid var(--pass);cursor:copy;margin-bottom:4px;
+  word-break:break-all;line-height:1.4}
+.read .val:hover{border-color:var(--ink);border-left-color:var(--pass)}
+.read .none{color:var(--mute);font-size:12px}
+
 label{display:block;font-size:11px;letter-spacing:.1em;color:var(--mute);
   text-transform:uppercase;font-family:var(--mono);margin-bottom:5px}
 input[type=text]{width:100%;font:inherit;font-family:var(--mono);font-size:15px;
@@ -231,6 +292,9 @@ footer b{color:var(--ink)}
 }
 @media print{
   body{background:#fff}
+  /* 打印要的是完整记录，折叠状态不该带到纸上 */
+  .step.shut .shots,.step.shut .refdes{display:block!important}
+  .caret,.count{display:none}
   .bar,#box,.copied,.verdicts{display:none}
   .step{break-inside:avoid}
   figure img{height:auto}
@@ -303,6 +367,8 @@ function render(){
     html += '<button class="go" data-tsv="' + pi + '">复制整表</button>';
     html += '<button data-sn="' + esc(p.serialNo) + '">复制序列号</button>';
     html += '<button onclick="window.print()">打印 / 存为 PDF</button>';
+    html += '<button data-fold="1">全部折叠</button>';
+    html += '<button data-fold="0">全部展开</button>';
     html += '<span class="hint">数值和结论可以直接在页面上填，填完点「复制整表」粘进系统</span>';
     html += '</div>';
 
@@ -313,7 +379,11 @@ function render(){
       html += '<div class="rail"><div class="node" data-node>' + num + '</div></div>';
 
       html += '<div class="body">';
-      html += '<div class="title">' + esc(s.name) + '</div>';
+      html += '<div class="title" data-toggle>';
+      html += '<span class="caret">▼</span>';
+      html += '<span>' + esc(s.name) + '</span>';
+      html += '<span class="count">' + s.shots.length + ' 张</span>';
+      html += '</div>';
       if (s.refDes) html += '<div class="refdes">' + esc(s.refDes) + '</div>';
       html += '<div class="shots">';
       s.shots.forEach(function(sh){
@@ -323,14 +393,23 @@ function render(){
         html += '</figure>';
       });
       html += '</div>';
-      var codes = [];
-      s.shots.forEach(function(sh){ if (sh.code && codes.indexOf(sh.code) < 0) codes.push(sh.code); });
-      codes.forEach(function(c){
-        html += '<span class="code copyable" data-copy="' + esc(c) + '">' + esc(c) + '</span> ';
-      });
       html += '</div>';
 
       html += '<div class="data">';
+
+      // 图里读出来的值放最上面 —— 报表的第一用途就是把这些数抄进系统
+      html += '<div class="read">';
+      html += '<label>识别值</label>';
+      var codes = s.codes || [];
+      if (codes.length) {
+        codes.forEach(function(c){
+          html += '<span class="val copyable" data-copy="' + esc(c) + '">' + esc(c) + '</span>';
+        });
+      } else {
+        html += '<span class="none">这组图里没识别到码</span>';
+      }
+      html += '</div>';
+
       html += '<label>读数</label>';
       html += '<input type="text" data-f="value" placeholder="例如 12.4V" value="' + esc(s.value) + '">';
       html += '<div class="verdicts">';
@@ -397,6 +476,21 @@ function bind(){
         var v = b.getAttribute("data-v");
         step.verdict = (step.verdict === v) ? "" : v;
         paint(pi, si);
+      });
+    });
+  });
+
+  document.querySelectorAll("[data-toggle]").forEach(function(t){
+    t.addEventListener("click", function(){
+      t.closest(".step").classList.toggle("shut");
+    });
+  });
+
+  document.querySelectorAll("[data-fold]").forEach(function(b){
+    b.addEventListener("click", function(){
+      var shut = b.getAttribute("data-fold") === "1";
+      document.querySelectorAll(".step").forEach(function(el){
+        el.classList.toggle("shut", shut);
       });
     });
   });
