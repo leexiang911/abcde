@@ -60,6 +60,7 @@ import com.sopcam.sop.SettingsStore
 import com.sopcam.sop.SopStep
 import com.sopcam.sop.SopStore
 import com.sopcam.sop.SopTemplate
+import com.sopcam.ui.AiLabScreen
 import com.sopcam.ui.BatchAction
 import com.sopcam.ui.CameraScreen
 import com.sopcam.ui.CrashScreen
@@ -95,7 +96,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private enum class Screen { SETUP, TEMPLATE_EDIT, SETTINGS, CAMERA, SCAN, PROJECTS, PROJECT_DETAIL, RETAKE_CONFIRM }
+private enum class Screen {
+    SETUP, TEMPLATE_EDIT, SETTINGS, CAMERA, SCAN, PROJECTS, PROJECT_DETAIL, RETAKE_CONFIRM, AI_LAB
+}
 
 /** 开工页上弹出的哪个选择器 */
 private enum class Sheet { NONE, MODEL, PLATFORM, FAULT, TEMPLATE }
@@ -290,6 +293,7 @@ class MainActivity : ComponentActivity() {
                         openProject = null
                         screen = Screen.PROJECTS
                     }
+                    Screen.AI_LAB -> screen = Screen.SETTINGS
                     Screen.PROJECTS -> {
                         picked = emptySet()
                         screen = Screen.SETUP
@@ -586,10 +590,13 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
+                Screen.AI_LAB -> AiLabScreen(onBack = { screen = Screen.SETTINGS })
+
                 Screen.SETTINGS -> SettingsScreen(
                     settings = settings,
                     archiveReady = archiveReady,
                     onGrantArchive = ::openArchivePermission,
+                    onAiLab = { screen = Screen.AI_LAB },
                     onChange = {
                         settings = it
                         SettingsStore.save(this, it)

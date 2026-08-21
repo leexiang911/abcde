@@ -43,5 +43,9 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- GPU 后端要显式声明这两个原生库，不声明会静默退回 CPU 且不报错 -->
+        <uses-native-library android:name="libvndksupport.so" android:required="false" />
+        <uses-native-library android:name="libOpenCL.so" android:required="false" />
     </application>
 </manifest>

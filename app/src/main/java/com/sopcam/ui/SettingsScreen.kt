@@ -33,6 +33,7 @@ fun SettingsScreen(
     settings: AppSettings,
     archiveReady: Boolean,
     onGrantArchive: () -> Unit,
+    onAiLab: () -> Unit,
     onChange: (AppSettings) -> Unit,
     onBack: () -> Unit,
 ) {
@@ -122,6 +123,25 @@ fun SettingsScreen(
             desc = "存到 Documents/SOP归档，不进相册。水印照片删了能从这里恢复，代价是占用翻倍。",
             checked = settings.keepOriginal,
         ) { onChange(settings.copy(keepOriginal = it)) }
+
+        Spacer(Modifier.height(28.dp))
+        SectionTitle("实验")
+
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(Panel)
+                .clickable(onClick = onAiLab)
+                .padding(16.dp)
+        ) {
+            Text("AI 实验室", color = Amber, fontSize = 16.sp)
+            Spacer(Modifier.height(5.dp))
+            Text(
+                "加载端侧模型，试试能不能读出表计数值。还在验证阶段，跟正式流程无关。",
+                color = Steel, fontSize = 12.sp, lineHeight = 18.sp
+            )
+        }
 
         Spacer(Modifier.height(28.dp))
         SectionTitle("快门反馈")

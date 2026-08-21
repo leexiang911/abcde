@@ -54,6 +54,10 @@ dependencies {
     // 纯 Java，无 NDK。选它是因为它允许自定义 LuminanceSource ——
     // ML Kit 只收 Bitmap，内部怎么转灰度控制不了
     implementation("com.google.zxing:core:3.5.3")
+
+    // 端侧大模型。带 arm64 原生库，APK 会明显变大，构建也会变慢。
+    // 模型文件本身两三个 GB，不打进包里，运行时从存储读
+    implementation("com.google.ai.edge.litertlm:litertlm-android:latest.release")
     implementation("androidx.annotation:annotation-experimental:1.4.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
