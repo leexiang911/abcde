@@ -36,6 +36,7 @@ import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
@@ -72,6 +73,9 @@ class CapturePipeline(
     private val queue = Channel<PendingShot>(capacity = 16)
     private val gate = Semaphore(concurrency)
 
+    /** 队列里还剩多少张没落盘。退出前要看它 */
+    val pending = AtomicInteger(0)
+
     val captureExecutor = Executors.newSingleThreadExecutor()
 
     init {
@@ -82,6 +86,7 @@ class CapturePipeline(
                         runCatching { process(shot) }
                             .onSuccess(onSaved)
                             .onFailure(onError)
+                        pending.decrementAndGet()
                     }
                 }
             }
@@ -161,13 +166,30 @@ class CapturePipeline(
     }
 
     fun submit(shot: PendingShot) {
-        if (queue.trySend(shot).isFailure) onError(IllegalStateException("落盘队列已满，请稍等"))
+        pending.incrementAndGet()
+        if (queue.trySend(shot).isFailure) {
+            pending.decrementAndGet()
+            onError(IllegalStateException("落盘队列已满，请稍等"))
+        }
     }
 
+    /** 队列里还剩多少张没落盘 */
+    /**
+     * 关闭。
+     *
+     * captureExecutor 是 takePicture 回调用的线程池 —— 按下快门到 JPEG 回调返回
+     * 大概两百毫秒，这期间关掉它，回调永远不会执行，那张照片连队列都进不去。
+     * 所以用 shutdown() 而不是 shutdownNow()：已提交的任务会跑完，只是不再收新的。
+     *
+     * 队列本身 close 之后，已经入队的仍会被消费者取完再退出，不用担心。
+     */
     fun shutdown() {
         queue.close()
         captureExecutor.shutdown()
     }
+
+    /** 还有照片在落盘的话，别急着退 */
+    fun busy(): Boolean = pending.get() > 0
 }
 
 /* ------------------------------------------------------------------

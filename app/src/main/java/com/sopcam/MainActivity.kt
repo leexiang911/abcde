@@ -48,6 +48,7 @@ import com.sopcam.capture.ShutterFeedback
 import com.sopcam.capture.shoot
 import com.sopcam.crash.CrashLogger
 import com.sopcam.meta.ImageMeta
+import com.sopcam.meta.PendingCleaner
 import com.sopcam.sop.AppSettings
 import com.sopcam.sop.Catalog
 import com.sopcam.sop.ControllerModel
@@ -212,6 +213,10 @@ class MainActivity : ComponentActivity() {
         faults = Faults.load(this)
         settings = SettingsStore.load(this)
         exportSettings = ExportStore.load(this)
+
+        // 上次落盘被打断留下的待定条目：文件占着空间，相册里看不见。
+        // 不主动清的话只会越攒越多
+        lifecycleScope.launch(Dispatchers.IO) { PendingCleaner.sweep(this@MainActivity) }
         SopStore.loadSession(this).let { s ->
             serialNo = s.serialNo
             modelId = s.modelId
@@ -290,10 +295,16 @@ class MainActivity : ComponentActivity() {
                         screen = Screen.SETUP
                     }
                     Screen.CAMERA -> {
-                        persist()
-                        camera?.cameraControl?.enableTorch(false)
-                        releaseFocus()
-                        screen = Screen.SETUP
+                        // 还有照片在存的话先拦一下 —— 这时候退出，
+                        // 进程被系统回收就可能丢照片
+                        if (pipeline.busy()) {
+                            lastSaved = "还有 ${pipeline.pending.get()} 张在存，稍等一下"
+                        } else {
+                            persist()
+                            camera?.cameraControl?.enableTorch(false)
+                            releaseFocus()
+                            screen = Screen.SETUP
+                        }
                     }
                     Screen.SCAN -> {
                         scannedCode = null
@@ -669,10 +680,14 @@ class MainActivity : ComponentActivity() {
                     },
                     onShutter = ::capture,
                     onExit = {
-                        persist()
-                        camera?.cameraControl?.enableTorch(false)
-                        releaseFocus()
-                        screen = Screen.SETUP
+                        if (pipeline.busy()) {
+                            lastSaved = "还有 ${pipeline.pending.get()} 张在存，稍等一下"
+                        } else {
+                            persist()
+                            camera?.cameraControl?.enableTorch(false)
+                            releaseFocus()
+                            screen = Screen.SETUP
+                        }
                     },
                     bindPreview = ::bindPreview
                 )

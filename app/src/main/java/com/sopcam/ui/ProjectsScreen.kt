@@ -68,7 +68,9 @@ fun ProjectsScreen(
     onExportSettings: (ExportSettings) -> Unit,
     onBack: () -> Unit,
 ) {
-    val sheetOpen = selected.isNotEmpty()
+    val selecting = selected.isNotEmpty()
+    // 展开的是哪个抽屉。窄条常驻，抽屉才是占地方的那层
+    var tray by remember { mutableStateOf("") }
 
     // 搜索和状态筛选叠加。扫码搜索本质上就是把码填进搜索框，不用另做一套
     var settingsOpen by remember { mutableStateOf(false) }
@@ -85,53 +87,94 @@ fun ProjectsScreen(
         Column(Modifier.fillMaxSize()) {
 
             Spacer(Modifier.height(32.dp))
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 20.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text("检修项目", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(3.dp))
-                    Text(
-                        when {
-                            selected.isNotEmpty() -> "已选 ${selected.size} 个"
-                            shown.size != all.size -> "筛出 ${shown.size} / ${all.size} 个"
-                            else -> "${all.size} 个项目"
-                        },
-                        color = if (selected.isEmpty()) Steel else Amber,
-                        fontSize = 13.sp
-                    )
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (shown.isNotEmpty()) {
+
+            // 多选时整个顶栏换成「计数 + 全选 + 取消」，跟系统相册一个路子。
+            // 平时那些入口在这个模式下没有意义，留着只会误触
+            if (selecting) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .clickable { onSelectAll(shown.map { it.serialNo }) }
+                            .padding(horizontal = 4.dp, vertical = 6.dp)
+                    ) {
+                        val allOn = shown.isNotEmpty() && selected.size == shown.size
+                        Box(
+                            Modifier
+                                .size(24.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (allOn) Amber else Color.Transparent)
+                                .border(
+                                    1.5.dp,
+                                    if (allOn) Amber else Steel,
+                                    RoundedCornerShape(12.dp)
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (allOn) {
+                                Text("✓", color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Spacer(Modifier.width(10.dp))
                         Text(
-                            if (selected.size == shown.size) "取消全选" else "全选",
-                            color = Steel,
-                            fontSize = 13.sp,
-                            modifier = Modifier
-                                .clickable { onSelectAll(shown.map { it.serialNo }) }
-                                .padding(10.dp)
+                            "${selected.size}",
+                            color = Color.White,
+                            fontSize = 19.sp,
+                            fontWeight = FontWeight.Bold
                         )
                     }
                     Text(
-                        "⚙",
-                        color = Steel,
-                        fontSize = 17.sp,
+                        "取消",
+                        color = Color.White,
+                        fontSize = 14.sp,
                         modifier = Modifier
-                            .clickable { settingsOpen = true }
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(Color(0xFF262D35))
+                            .clickable { onSelectAll(emptyList()) }
+                            .padding(horizontal = 18.dp, vertical = 9.dp)
                     )
-                    Text(
-                        "返回",
-                        color = Amber,
-                        fontSize = 13.sp,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .border(1.dp, Amber, RoundedCornerShape(4.dp))
-                            .clickable(onClick = onBack)
-                            .padding(horizontal = 14.dp, vertical = 9.dp)
-                    )
+                }
+            } else {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text("检修项目", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(3.dp))
+                        Text(
+                            if (shown.size != all.size) "筛出 ${shown.size} / ${all.size} 个"
+                            else "${all.size} 个项目",
+                            color = Steel,
+                            fontSize = 13.sp
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "⚙",
+                            color = Steel,
+                            fontSize = 17.sp,
+                            modifier = Modifier
+                                .clickable { settingsOpen = true }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        )
+                        Text(
+                            "返回",
+                            color = Amber,
+                            fontSize = 13.sp,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .border(1.dp, Amber, RoundedCornerShape(4.dp))
+                                .clickable(onClick = onBack)
+                                .padding(horizontal = 14.dp, vertical = 9.dp)
+                        )
+                    }
                 }
             }
 
@@ -169,7 +212,19 @@ fun ProjectsScreen(
                             onOpen = { onOpen(p) }
                         )
                     }
-                    item { Spacer(Modifier.height(if (sheetOpen) 220.dp else 24.dp)) }
+                    // 只给底栏留出它真正占的高度 —— 以前不管展没展开都留 220dp，
+                    // 列表被顶掉一大截，滚都滚不到底
+                    item {
+                        Spacer(
+                            Modifier.height(
+                                when {
+                                    !selecting -> 24.dp
+                                    tray.isBlank() -> 84.dp
+                                    else -> 300.dp
+                                }
+                            )
+                        )
+                    }
                 }
             }
         }
@@ -182,12 +237,15 @@ fun ProjectsScreen(
             )
         }
 
-        if (sheetOpen) {
+        if (selecting) {
             Box(Modifier.align(Alignment.BottomCenter)) {
-                ExportBar(
+                ActionDock(
+                    count = selected.size,
                     serials = selected.toList(),
                     exporting = exporting,
                     exportSettings = exportSettings,
+                    tray = tray,
+                    onTray = { tray = if (tray == it) "" else it },
                     onOpenSettings = { settingsOpen = true },
                     onExport = onExport,
                     onDelete = onDelete
@@ -287,24 +345,31 @@ private fun ProjectRow(
     }
 }
 
+/**
+ * 多选时的底部操作坞。
+ *
+ * 常驻的只有一条窄图标栏，抽屉点开才展开 —— 以前是选中就弹一个大面板，
+ * 占掉半屏，想继续往下滚着选都做不到。
+ */
 @Composable
-private fun ExportBar(
+private fun ActionDock(
+    count: Int,
     serials: List<String>,
     exporting: String?,
     exportSettings: ExportSettings,
+    tray: String,
+    onTray: (String) -> Unit,
     onOpenSettings: () -> Unit,
     onExport: (Exporter.Options) -> Unit,
     onDelete: (DeleteScope) -> Unit,
 ) {
-    // 导出和删除并排，但删除要先摊开范围再确认 ——
-    // 多项目一起删比单项目危险得多，不能一按就没
     var deleting by remember { mutableStateOf(false) }
 
     if (deleting) {
         ConfirmTypedDialog(
             title = "删除 ${serials.size} 个项目",
             detail = "这些控制器的原图和水印照片会一起清空，之后再也重烧不出来。" +
-                "只想清相册的话，用左边那个「删除水印图片」。",
+                "只想清相册的话，用「删除水印图」。",
             actionLabel = "删除",
             onCancel = { deleting = false },
             onConfirm = {
@@ -313,32 +378,76 @@ private fun ExportBar(
             }
         )
     }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(Color(0xFA13181D))
+    ) {
+        if (exporting != null) {
+            Text(
+                exporting,
+                color = Amber,
+                fontSize = 13.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 14.dp)
+            )
+            return@Column
+        }
+
+        when (tray) {
+            "export" -> ExportTray(serials, exportSettings, onOpenSettings, onExport)
+            "delete" -> DeleteTray(count, onDelete) { deleting = true }
+            else -> Unit
+        }
+
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp)
+                .padding(top = 6.dp, bottom = 20.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            DockItem("导出", "⬆", tray == "export") { onTray("export") }
+            DockItem("删除", "🗑", tray == "delete") { onTray("delete") }
+        }
+    }
+}
+
+@Composable
+private fun DockItem(label: String, glyph: String, active: Boolean, onClick: () -> Unit) {
+    Column(
+        Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 30.dp, vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(glyph, color = if (active) Amber else Color.White, fontSize = 18.sp)
+        Spacer(Modifier.height(3.dp))
+        Text(label, color = if (active) Amber else Steel, fontSize = 11.5.sp)
+    }
+}
+
+@Composable
+private fun ExportTray(
+    serials: List<String>,
+    exportSettings: ExportSettings,
+    onOpenSettings: () -> Unit,
+    onExport: (Exporter.Options) -> Unit,
+) {
     // 按下导出之前先把张数和体积摆出来 —— 微信传文件有上限，
     // 80MB 的包发不出去，事后才发现最耽误事
     val wm = remember(serials) { Exporter.plan(serials, Exporter.Options(true, false)) }
     val raw = remember(serials) { Exporter.plan(serials, Exporter.Options(false, true)) }
 
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp))
-            .background(Color(0xFA1B2026))
-            .padding(20.dp)
-    ) {
-        if (exporting != null) {
-            Text(exporting, color = Amber, fontSize = 14.sp)
-            Spacer(Modifier.height(6.dp))
-            Text("打包中，别退出这个页面", color = Steel, fontSize = 12.sp)
-            return@Column
-        }
-
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 16.dp)) {
         Row(
-            Modifier.fillMaxWidth(),
+            Modifier.fillMaxWidth().padding(bottom = 10.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("导出", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-            // 压缩设置在这儿改最顺手 —— 要发之前才会想起这事
+            Text("导出", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
             Text(
                 exportSettings.summary() + "  ⚙",
                 color = Amber,
@@ -350,7 +459,6 @@ private fun ExportBar(
                     .padding(horizontal = 10.dp, vertical = 6.dp)
             )
         }
-        Spacer(Modifier.height(12.dp))
 
         ExportButton(
             "只导水印图",
@@ -375,43 +483,56 @@ private fun ExportBar(
             primary = true
         ) { onExport(Exporter.Options(watermarked = true, original = true)) }
 
-        Spacer(Modifier.height(14.dp))
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            // 只删相册成片：原图还在，随时能重烧回来，所以不设门槛
-            Text(
-                "删除水印图片",
-                color = Color.White,
-                fontSize = 13.sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0xFF262D35))
-                    .clickable { onDelete(DeleteScope.GALLERY_ONLY) }
-                    .padding(vertical = 13.dp)
-            )
-            // 连原图一起删：不可恢复，走输入确认
-            Text(
-                "删除项目",
-                color = Color(0xFFE86A5C),
-                fontSize = 13.sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(8.dp))
-                    .border(1.dp, Color(0x55E86A5C), RoundedCornerShape(8.dp))
-                    .clickable { deleting = true }
-                    .padding(vertical = 13.dp)
-            )
-        }
-
         Spacer(Modifier.height(10.dp))
         Text(
-            "点项目可以进去看图。zip 里水印图和原图分开放，导出不会动原来的数据",
+            "zip 里水印图和原图分开放，导出不会动原来的数据",
             color = Color(0xFF4A525C),
             fontSize = 11.sp
         )
+        Spacer(Modifier.height(4.dp))
+    }
+}
+
+@Composable
+private fun DeleteTray(count: Int, onDelete: (DeleteScope) -> Unit, onDangerous: () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 16.dp)) {
+        Text("删除 $count 个项目", color = Color.White, fontSize = 14.sp,
+            fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(10.dp))
+
+        // 只清相册的随时能从原图重烧回来，不设门槛；连原图一起删的走输入确认
+        Text(
+            "删除水印图片",
+            color = Color.White,
+            fontSize = 14.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(0xFF262D35))
+                .clickable { onDelete(DeleteScope.GALLERY_ONLY) }
+                .padding(vertical = 13.dp)
+        )
+        Spacer(Modifier.height(4.dp))
+        Text("原图留着，随时能重烧回来", color = Steel, fontSize = 11.sp)
+
+        Spacer(Modifier.height(10.dp))
+
+        Text(
+            "删除项目",
+            color = Color(0xFFE86A5C),
+            fontSize = 14.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .border(1.dp, Color(0x55E86A5C), RoundedCornerShape(8.dp))
+                .clickable(onClick = onDangerous)
+                .padding(vertical = 13.dp)
+        )
+        Spacer(Modifier.height(4.dp))
+        Text("原图和成片一起清空，不可恢复", color = Color(0xFFE86A5C), fontSize = 11.sp)
+        Spacer(Modifier.height(6.dp))
     }
 }
 
