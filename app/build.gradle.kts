@@ -57,7 +57,9 @@ dependencies {
 
     // 端侧大模型。带 arm64 原生库，APK 会明显变大，构建也会变慢。
     // 模型文件本身两三个 GB，不打进包里，运行时从存储读
-    implementation("com.google.ai.edge.litertlm:litertlm-android:latest.release")
+    // 钉死版本，不用 latest.release —— 动态版本每次构建拉到什么全看运气，
+    // 上一轮就是它悄悄拉进了要求 Kotlin 2.2 的包
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.13.1")
     implementation("androidx.annotation:annotation-experimental:1.4.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
