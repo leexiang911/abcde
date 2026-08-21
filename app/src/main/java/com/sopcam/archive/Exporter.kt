@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Environment
 import androidx.core.content.FileProvider
 import com.sopcam.meta.Xmp
+import com.sopcam.sop.SopTemplate
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.text.SimpleDateFormat
@@ -67,6 +68,7 @@ object Exporter {
         serials: List<String>,
         opt: Options,
         settings: ExportSettings = ExportSettings(),
+        template: SopTemplate? = null,
         onProgress: (Int, Int) -> Unit = { _, _ -> },
     ): File? {
         if (serials.isEmpty() || !opt.any) return null
@@ -102,7 +104,7 @@ object Exporter {
                 if (settings.htmlReport) {
                     val ext = if (settings.compresses && settings.format == ExportFormat.WEBP)
                         "webp" else "jpg"
-                    val manifest = Report.manifest(serials, ext, opt.watermarked)
+                    val manifest = Report.manifest(serials, ext, opt.watermarked, template)
                     putBytes(
                         zip, "报表.html",
                         Report.html(manifest).toByteArray(Charsets.UTF_8), out

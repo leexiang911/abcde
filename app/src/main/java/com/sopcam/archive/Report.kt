@@ -1,5 +1,6 @@
 package com.sopcam.archive
 
+import com.sopcam.sop.SopTemplate
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -34,6 +35,7 @@ object Report {
         serials: List<String>,
         imageExt: String,
         watermarked: Boolean,
+        template: SopTemplate? = null,
     ): JSONObject {
         val projects = JSONArray()
         val index = Archive.list().associateBy { it.serialNo }
@@ -49,17 +51,18 @@ object Report {
             Archive.shots(sn).forEach { raw ->
                 val side = Archive.sidecar(raw) ?: JSONObject()
                 val order = side.optInt("stepOrder", 0)
-                // 认文件名，不认 stepName。
-                //
-                // 用户在大图里「改水印文字 / 改文件名」时，改的是 fileName，
-                // stepName 还停在拍摄那一刻的步骤上。按 stepName 分组的话，
-                // 改过名的照片会被塞回原来那一栏 —— 两套流程的 01 就撞在一起了。
-                // 文件名是用户亲手改的、也是他在界面上看到的，那才是真的。
+                // 分组三级回退：
+                //  ① 元数据里的 stepGroup —— 拍照那刻按流程配置写下的，最可靠
+                //  ② 文件名 —— 用户改过名的话，那才是他要的（stepName 会停在旧步骤上）
+                //  ③ stepName —— 老照片的兜底
                 val fileStem = side.optString("fileName").ifBlank { raw.nameWithoutExtension }
-                val name = labelOf(fileStem)
+                val groupName = side.optString("stepGroup")
+                val name = groupName
+                    .ifBlank { labelOf(fileStem) }
                     .ifBlank { side.optString("stepName") }
                     .ifBlank { "自由拍摄" }
-                val key = "$order|$name"
+                val point = side.optString("stepPoint")
+                val key = if (groupName.isNotBlank()) "g|$groupName" else "$order|$name"
 
                 val group = steps.getOrPut(key) {
                     JSONObject()
@@ -69,6 +72,7 @@ object Report {
                         .put("refDes", side.optString("stepRefDes"))
                         .put("shots", JSONArray())
                         .put("codes", JSONArray())
+                        .put("points", JSONArray())
                         .put("value", "")
                         .put("unit", "")
                         .put("verdict", "")
@@ -93,6 +97,13 @@ object Report {
                         .put("code", side.optString("codeValue"))
                 )
 
+                // 每个测点一个格子。同一测点拍多张，格子还是一个
+                if (point.isNotBlank()) {
+                    val pts = group.getJSONArray("points")
+                    val seen = (0 until pts.length()).any { pts.getJSONObject(it).optString("name") == point }
+                    if (!seen) pts.put(JSONObject().put("name", point).put("value", ""))
+                }
+
                 // 码值汇到组上，报表右栏直接显示，不用在图底下找
                 val code = side.optString("codeValue")
                 if (code.isNotBlank()) {
@@ -111,6 +122,20 @@ object Report {
                     { it.optLong("firstAt") },
                 )
             )
+
+            // 把判定规则拌进去，报表页面自己算 —— 数一填完当场出正常/异常
+            ordered.forEach { g ->
+                val row = g.optString("name")
+                template?.groupOf(row)?.let { gr ->
+                    gr.rule?.let { g.put("groupRule", it.toJson()) }
+                    if (gr.unit.isNotBlank()) g.put("unit", gr.unit)
+                }
+                val step = template?.steps?.firstOrNull { it.rowName() == row }
+                step?.let { st ->
+                    st.rule?.let { g.put("valueRule", it.toJson()) }
+                    if (st.unit.isNotBlank() && g.optString("unit").isBlank()) g.put("unit", st.unit)
+                }
+            }
 
             projects.put(
                 JSONObject()
@@ -262,6 +287,14 @@ label{display:block;font-size:11px;letter-spacing:.1em;color:var(--mute);
 input[type=text]{width:100%;font:inherit;font-family:var(--mono);font-size:15px;
   padding:8px 10px;border:1px solid var(--rule);background:#fff}
 input[type=text]:focus{outline:2px solid var(--mark);outline-offset:-1px;border-color:var(--mark)}
+.pt{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.ptname{font-family:var(--mono);font-size:11.5px;color:var(--mute);
+  min-width:52px;flex-shrink:0}
+.pt input{flex:1}
+.auto{font-size:12px;line-height:1.5;margin-top:8px;min-height:1px}
+.auto.yes{color:var(--pass)}
+.auto.no{color:var(--fail)}
+
 .verdicts{display:flex;gap:6px;margin-top:14px}
 .verdicts button{flex:1;padding:8px 4px;font-size:12.5px}
 .verdicts button.on[data-v=pass]{background:var(--pass);border-color:var(--pass);color:#fff}
@@ -410,8 +443,19 @@ function render(){
       }
       html += '</div>';
 
-      html += '<label>读数</label>';
-      html += '<input type="text" data-f="value" placeholder="例如 12.4V" value="' + esc(s.value) + '">';
+      html += '<label>读数' + (s.unit ? ' (' + esc(s.unit) + ')' : '') + '</label>';
+      if (s.points && s.points.length) {
+        // 每个测点一格。管压降六个管子各填各的，才判得出是哪个掉队
+        s.points.forEach(function(pt, pi){
+          html += '<div class="pt">';
+          html += '<span class="ptname">' + esc(pt.name) + '</span>';
+          html += '<input type="text" data-pt="' + pi + '" value="' + esc(pt.value) + '">';
+          html += '</div>';
+        });
+      } else {
+        html += '<input type="text" data-f="value" placeholder="例如 12.4" value="' + esc(s.value) + '">';
+      }
+      html += '<div class="auto" data-auto></div>';
       html += '<div class="verdicts">';
       VERDICTS.forEach(function(v){
         html += '<button data-v="' + v[0] + '">' + v[1] + '</button>';
@@ -428,7 +472,7 @@ function render(){
   app.innerHTML = html;
   bind();
   DATA.projects.forEach(function(p, pi){
-    p.steps.forEach(function(s, si){ paint(pi, si); });
+    p.steps.forEach(function(s, si){ paint(pi, si); judge(pi, si); });
   });
 }
 
@@ -445,6 +489,79 @@ function paint(pi, si){
   el.querySelectorAll(".verdicts button").forEach(function(b){
     b.classList.toggle("on", b.getAttribute("data-v") === v);
   });
+}
+
+function num(v){
+  var n = parseFloat(String(v == null ? "" : v).replace(/[^0-9.\-]/g, ""));
+  return isFinite(n) ? n : null;
+}
+
+/**
+ * 按流程里配的规则当场判定。
+ *
+ * 两条规则要同时成立：每个值都在绝对范围内，而且这一组彼此靠拢。
+ * 只看范围会漏掉「一个 0.30 一个 0.42」这种都在范围内但明显掉队的；
+ * 只看抱团会漏掉「六个都是 0.6」这种整体偏了的。
+ */
+function judge(pi, si){
+  var el = stepEl(pi, si);
+  if (!el) return;
+  var s = DATA.projects[pi].steps[si];
+  var slot = el.querySelector("[data-auto]");
+  if (!slot) return;
+
+  var vals = [], names = [];
+  if (s.points && s.points.length) {
+    s.points.forEach(function(p){ vals.push(num(p.value)); names.push(p.name); });
+  } else {
+    vals.push(num(s.value)); names.push("");
+  }
+  var real = vals.filter(function(v){ return v !== null; });
+  if (!real.length) { slot.textContent = ""; slot.className = "auto"; return; }
+
+  var bad = [];
+
+  var vr = s.valueRule;
+  if (vr && vr.type === "range") {
+    vals.forEach(function(v, i){
+      if (v === null) return;
+      if (vr.min != null && v < vr.min) bad.push((names[i] || "值") + " 低于 " + vr.min);
+      if (vr.max != null && v > vr.max) bad.push((names[i] || "值") + " 高于 " + vr.max);
+    });
+  }
+
+  var gr = s.groupRule;
+  if (gr && gr.type === "spread" && real.length > 1) {
+    var lo = Math.min.apply(null, real), hi = Math.max.apply(null, real);
+    var base = gr.base === "max" ? hi : lo;
+    if (base) {
+      var ratio = (hi - lo) / base;
+      if (ratio > gr.maxRatio) {
+        var sorted = real.slice().sort(function(a,b){ return a-b; });
+        var mid = sorted[Math.floor(sorted.length/2)];
+        var worst = 0, far = -1;
+        vals.forEach(function(v, i){
+          if (v === null) return;
+          var d = Math.abs(v - mid);
+          if (d > far) { far = d; worst = i; }
+        });
+        bad.push("组内偏差 " + Math.round(ratio*100) + "%，超过 " +
+                 Math.round(gr.maxRatio*100) + "%（" + (names[worst] || "?") + " 最偏）");
+      }
+    }
+  }
+
+  if (!s.valueRule && !s.groupRule) { slot.textContent = ""; slot.className = "auto"; return; }
+
+  if (bad.length) {
+    slot.className = "auto no";
+    slot.textContent = "✕ " + bad.join("；");
+    if (!s.verdict) { s.verdict = "fail"; paint(pi, si); }
+  } else {
+    slot.className = "auto yes";
+    slot.textContent = "✓ 符合标准";
+    if (!s.verdict) { s.verdict = "pass"; paint(pi, si); }
+  }
 }
 
 function bind(){
@@ -468,6 +585,14 @@ function bind(){
     el.querySelectorAll("input[data-f]").forEach(function(inp){
       inp.addEventListener("input", function(){
         step[inp.getAttribute("data-f")] = inp.value;
+        judge(pi, si);
+      });
+    });
+
+    el.querySelectorAll("input[data-pt]").forEach(function(inp){
+      inp.addEventListener("input", function(){
+        step.points[+inp.getAttribute("data-pt")].value = inp.value;
+        judge(pi, si);
       });
     });
 
@@ -517,9 +642,12 @@ function tsv(pi){
   var rows = [["序号","检修项目","位号","读数","结论","备注","图片"].join("\t")];
   p.steps.forEach(function(s){
     var files = s.shots.map(function(x){ return x.name; }).join(" ");
+    var reading = (s.points && s.points.length)
+      ? s.points.map(function(p){ return p.name + "=" + (p.value || ""); }).join(" ")
+      : (s.value || "");
     rows.push([
       s.order > 0 ? s.order : "",
-      s.name, s.refDes || "", s.value || "",
+      s.name, s.refDes || "", reading,
       label[s.verdict] || "", s.remark || "", files
     ].join("\t"));
   });

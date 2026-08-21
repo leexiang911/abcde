@@ -25,6 +25,10 @@ data class ImageMeta(
     val stepOrder: Int = 0,
     val stepName: String = "",
     val stepRefDes: String = "",
+    /** 测点名，例如 "上桥U"。报表要靠它区分同一检查项下的几个测点 */
+    val stepPoint: String = "",
+    /** 报表归到哪一行，例如 "上桥管压降" */
+    val stepGroup: String = "",
     val codeValue: String = "",
     val codeFormat: String = "",
     val anchor: String = "",
@@ -65,6 +69,8 @@ object Xmp {
                 add("sopcam:StepOrder" to meta.stepOrder.toString())
                 add("sopcam:StepName" to meta.stepName)
                 if (meta.stepRefDes.isNotBlank()) add("sopcam:StepRefDes" to meta.stepRefDes)
+            if (meta.stepPoint.isNotBlank()) add("sopcam:StepPoint" to meta.stepPoint)
+            if (meta.stepGroup.isNotBlank()) add("sopcam:StepGroup" to meta.stepGroup)
             }
             if (meta.codeValue.isNotBlank()) {
                 add("sopcam:CodeValue" to meta.codeValue)

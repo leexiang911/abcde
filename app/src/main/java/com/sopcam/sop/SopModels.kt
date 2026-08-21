@@ -15,21 +15,47 @@ import java.util.Locale
  */
 
 /** 一个拍摄点位。项目名必填，位号可选——对齐检修单上「测试项目」那一列的实际写法。 */
+/**
+ * 一个拍摄步骤 = 一个测点。
+ *
+ * 拍摄顺序和报表结构是两件事：管压降拍六次（六个测点），
+ * 报表上却只占两行（上桥一行、下桥一行）。所以步骤上挂一个 group，
+ * 报表按 group 归行，拍摄按 step 走，两边各自舒服。
+ */
 data class SopStep(
     val order: Int,
     val name: String,
     val refDes: String = "",
     val shots: Int = 1,
+    /** 测点名，例如 "上桥U"。同一检查项下的每个测点各占一个步骤 */
+    val point: String = "",
+    /** 报表归到哪一行。留空则这一步自成一行 */
+    val group: String = "",
+    val unit: String = "",
+    /** 这个测点自己的值要满足的规则 */
+    val rule: Rule? = null,
+    /** 什么型号 / 平台 / 故障下才需要做这一项 */
+    val applies: Applies = Applies(),
 ) {
-    /** 水印强调行 / 文件名主干，例如 "Q1200-5脚 水泵输出电压" */
+    /** 水印强调行 / 文件名主干，例如 "Q1200-5脚 水泵输出电压" 或 "管压降 上桥U" */
     fun label(): String =
-        if (refDes.isBlank()) name else "$refDes $name"
+        listOf(refDes, name, point).filter { it.isNotBlank() }.joinToString(" ")
+
+    /** 报表上归哪一行 */
+    fun rowName(): String = group.ifBlank { name }
 
     fun toJson(): JSONObject = JSONObject()
         .put("order", order)
         .put("name", name)
         .put("refDes", refDes)
         .put("shots", shots)
+        .put("point", point)
+        .put("group", group)
+        .put("unit", unit)
+        .apply {
+            rule?.let { put("rule", it.toJson()) }
+            applies.toJson()?.let { put("only", it) }
+        }
 
     companion object {
         fun from(o: JSONObject) = SopStep(
@@ -37,6 +63,31 @@ data class SopStep(
             name = o.optString("name"),
             refDes = o.optString("refDes"),
             shots = o.optInt("shots", 1),
+            point = o.optString("point"),
+            group = o.optString("group"),
+            unit = o.optString("unit"),
+            rule = Rule.from(o.optJSONObject("rule")),
+            applies = Applies.from(o.optJSONObject("only")),
+        )
+    }
+}
+
+/** 检查项级别的规则，作用在一组测点的值上 */
+data class SopGroup(
+    val name: String,
+    val rule: Rule? = null,
+    val unit: String = "",
+) {
+    fun toJson(): JSONObject = JSONObject()
+        .put("name", name)
+        .put("unit", unit)
+        .apply { rule?.let { put("rule", it.toJson()) } }
+
+    companion object {
+        fun from(o: JSONObject) = SopGroup(
+            name = o.optString("name"),
+            rule = Rule.from(o.optJSONObject("rule")),
+            unit = o.optString("unit"),
         )
     }
 }
@@ -45,19 +96,38 @@ data class SopTemplate(
     val id: String,
     val name: String,
     val steps: List<SopStep>,
+    val groups: List<SopGroup> = emptyList(),
 ) {
+    fun groupOf(name: String): SopGroup? = groups.firstOrNull { it.name == name }
+
+    /**
+     * 按这台机器的型号 / 平台 / 故障筛出真正要做的步骤。
+     *
+     * 不适用的项直接不出现在步骤梯上，报表里也没这行 ——
+     * 「A+ 没有保险这一项」就是这么落地的，不用为它单开一套流程。
+     */
+    fun forCase(model: String, platform: String, fault: String): List<SopStep> =
+        steps.filter { it.applies.matches(model, platform, fault) }
+
     fun toJson(): JSONObject = JSONObject()
         .put("id", id)
         .put("name", name)
         .put("steps", JSONArray().apply { steps.forEach { put(it.toJson()) } })
+        .apply {
+            if (groups.isNotEmpty()) {
+                put("groups", JSONArray().apply { groups.forEach { put(it.toJson()) } })
+            }
+        }
 
     companion object {
         fun from(o: JSONObject): SopTemplate {
             val arr = o.optJSONArray("steps") ?: JSONArray()
+            val gs = o.optJSONArray("groups") ?: JSONArray()
             return SopTemplate(
-                id = o.optString("id"),
-                name = o.optString("name"),
+                id = o.optString("id").ifBlank { "t" + System.currentTimeMillis() },
+                name = o.optString("name").ifBlank { "未命名流程" },
                 steps = (0 until arr.length()).map { SopStep.from(arr.getJSONObject(it)) },
+                groups = (0 until gs.length()).map { SopGroup.from(gs.getJSONObject(it)) },
             )
         }
     }
@@ -142,6 +212,22 @@ object SopParser {
 
     // 行首的编号：1. / 1、/ 01 / 1) / 1：
     private val leadingIndex = Regex("""^\d{1,3}\s*[.、)\]．:：]?\s*""")
+
+    /**
+     * 整份流程。粘 JSON 就按 JSON 读，粘纯文本就一行一条。
+     *
+     * 复杂流程（测点、判定规则、适用条件）在手机上一项项点会疯掉，
+     * 所以让人在电脑上用记事本写 JSON，粘进来一次成型。
+     * 以后有了后台，后台生成的也是同一份 JSON，手机端不用改。
+     */
+    fun parseTemplate(raw: String, fallbackName: String): SopTemplate? {
+        val t = raw.trim()
+        if (!t.startsWith("{")) return null
+        return runCatching { SopTemplate.from(JSONObject(t)) }
+            .getOrNull()
+            ?.takeIf { it.steps.isNotEmpty() }
+            ?.let { if (it.name.isBlank()) it.copy(name = fallbackName) else it }
+    }
 
     /**
      * 一行一条。同时兼容从表格直接复制过来的情况——

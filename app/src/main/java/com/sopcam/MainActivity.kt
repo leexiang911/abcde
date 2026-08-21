@@ -716,7 +716,9 @@ class MainActivity : ComponentActivity() {
         if (serials.isEmpty() || !opt.any) return
         exporting = "准备中…"
         lifecycleScope.launch(Dispatchers.IO) {
-            val zip = Exporter.export(serials, opt, exportSettings) { done, total ->
+            // 报表要按流程里配的规则自动判定，所以把当前流程一起交出去
+            val tpl = templates.firstOrNull { it.id == templateId }
+            val zip = Exporter.export(serials, opt, exportSettings, tpl) { done, total ->
                 lifecycleScope.launch(Dispatchers.Main) { exporting = "打包中 $done / $total" }
             }
             withContext(Dispatchers.Main) {
@@ -1123,6 +1125,8 @@ class MainActivity : ComponentActivity() {
             stepOrder = step?.order ?: 0,
             stepName = step?.name ?: "",
             stepRefDes = step?.refDes ?: "",
+            stepPoint = step?.point ?: "",
+            stepGroup = step?.rowName() ?: "",
             // 这里刻意留空。
             //
             // 以前是把取景时扫到的码带进来，但那个值会"记住"不清空，

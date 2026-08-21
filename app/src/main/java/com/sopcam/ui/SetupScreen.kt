@@ -217,7 +217,13 @@ fun TemplateEditScreen(
 ) {
     var name by remember { mutableStateOf("") }
     var raw by remember { mutableStateOf("") }
-    val parsed: List<SopStep> = remember(raw) { SopParser.parse(raw) }
+    // 粘 JSON 就整份读进来（带测点、规则、适用条件），粘纯文本还是一行一条
+    val asJson: SopTemplate? = remember(raw, name) {
+        SopParser.parseTemplate(raw, name.ifBlank { "未命名流程" })
+    }
+    val parsed: List<SopStep> = remember(raw, asJson) {
+        asJson?.steps ?: SopParser.parse(raw)
+    }
 
     Column(
         Modifier
@@ -242,8 +248,15 @@ fun TemplateEditScreen(
         Text("测试项目", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
         Spacer(Modifier.height(4.dp))
         Text(
-            "一行一条。从检修单表格整列复制过来也行，行首的序号和「正常」那列会自动去掉。",
-            color = Steel, fontSize = 13.sp
+            if (asJson != null)
+                "读到 JSON 流程：${asJson.name} · ${asJson.steps.size} 个测点" +
+                    if (asJson.groups.isNotEmpty()) " · ${asJson.groups.size} 组判定规则" else ""
+            else
+                "一行一条。从检修单表格整列复制过来也行，行首的序号和「正常」那列会自动去掉。" +
+                    "带测点和判定规则的完整流程，直接粘 JSON 进来。",
+            color = if (asJson != null) Done else Steel,
+            fontSize = 13.sp,
+            lineHeight = 19.sp
         )
         Spacer(Modifier.height(10.dp))
 
@@ -309,10 +322,14 @@ fun TemplateEditScreen(
         Spacer(Modifier.height(12.dp))
         PrimaryButton(
             label = "保存流程",
-            enabled = name.isNotBlank() && parsed.isNotEmpty(),
+            // JSON 里自带名称，不必再手填一遍
+            enabled = parsed.isNotEmpty() && (name.isNotBlank() || asJson != null),
             onClick = {
                 onSave(
-                    SopTemplate(
+                    asJson?.copy(
+                        id = System.currentTimeMillis().toString(),
+                        name = name.ifBlank { asJson.name }.trim(),
+                    ) ?: SopTemplate(
                         id = System.currentTimeMillis().toString(),
                         name = name.trim(),
                         steps = parsed
