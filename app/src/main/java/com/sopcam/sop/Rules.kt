@@ -1,5 +1,6 @@
 package com.sopcam.sop
 
+import kotlin.math.abs
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -138,7 +139,7 @@ object Judge {
 
         val mid = real.sorted()[real.size / 2]
         val worst = values.indices.maxByOrNull { i ->
-            values[i]?.let { kotlin.math.abs(it - mid) } ?: -1.0
+            values[i]?.let { abs(it - mid) } ?: -1.0
         }
         val pct = (ratio * 100).toInt()
         return Verdict(false, "组内偏差 $pct%，超过 ${(rule.maxRatio * 100).toInt()}%") to worst

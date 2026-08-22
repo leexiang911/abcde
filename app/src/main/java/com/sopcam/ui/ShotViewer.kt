@@ -97,6 +97,7 @@ fun ShotViewer(
     var offerCrop by remember(item.file.absolutePath) { mutableStateOf(false) }
     var cropping by remember(item.file.absolutePath) { mutableStateOf(false) }
     var cropNote by remember(item.file.absolutePath) { mutableStateOf<String?>(null) }
+    var confirmDelete by remember(item.file.absolutePath) { mutableStateOf(false) }
 
     // 水印内容从随行 json 读，预览要跟成片一致
     val side = remember(item.file.absolutePath) { Archive.sidecar(item.file) }
@@ -276,7 +277,7 @@ fun ShotViewer(
                         offerCrop = false
                     },
                     onEditText = onEditText,
-                    onDelete = onDelete
+                    onAskDelete = { confirmDelete = true }
                 )
 
                 Tray.NONE -> Unit
@@ -324,6 +325,21 @@ fun ShotViewer(
                 ) { tray = if (tray == Tray.MORE) Tray.NONE else Tray.MORE }
                 BarButton("关闭", Modifier.weight(1f), onClick = onClose)
             }
+        }
+
+        // 删的是归档原图，删完这张就再也重烧不出来了，得拦一道
+        if (confirmDelete) {
+            ConfirmTypedDialog(
+                title = "删除这张原图",
+                detail = "${item.stepName.ifBlank { "这张照片" }} 的原图会被删除，" +
+                    "之后不能再重烧回相册。相册里已有的成片不受影响。",
+                actionLabel = "删除",
+                onCancel = { confirmDelete = false },
+                onConfirm = {
+                    confirmDelete = false
+                    onDelete()
+                }
+            )
         }
 
         if (cropping) {
@@ -538,7 +554,7 @@ private fun MoreTray(
     onCrop: () -> Unit,
     onClearCode: () -> Unit,
     onEditText: () -> Unit,
-    onDelete: () -> Unit,
+    onAskDelete: () -> Unit,
 ) {
     Column(
         Modifier
@@ -568,7 +584,7 @@ private fun MoreTray(
                 "删除这张",
                 modifier = Modifier.weight(1f),
                 danger = true,
-                onClick = onDelete
+                onClick = onAskDelete
             )
         }
     }

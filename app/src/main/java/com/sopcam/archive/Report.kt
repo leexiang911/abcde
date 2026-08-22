@@ -257,8 +257,19 @@ button.go{background:var(--mark);border-color:var(--mark);font-weight:600}
 .caret{font-family:var(--mono);font-size:11px;color:var(--mute);
   transition:transform .15s;display:inline-block}
 .step.shut .caret{transform:rotate(-90deg)}
-.step.shut .shots,.step.shut .refdes{display:none}
-.step.shut .body{padding-bottom:18px}
+/* 折叠要真的塌下去：图片和整个右栏都收起来，行高压到一行。
+   只藏图片的话右边那列输入框还撑着高度，滚半天才翻一项 */
+.step.shut .shots,.step.shut .refdes,.step.shut .data{display:none}
+.step.shut .body{padding:9px 22px 9px 4px}
+.step.shut .rail{padding:9px 0}
+.step.shut .title{font-size:15px}
+/* 折起来时把结论显在标题上，一眼扫完整台机器 */
+.step.shut .tag{display:inline-block}
+.tag{display:none;font-size:11px;padding:1px 8px;border-radius:9px;
+  color:#fff;font-weight:600}
+.tag.pass{background:var(--pass)}
+.tag.fail{background:var(--fail)}
+.tag.unsure{background:var(--unsure)}
 .count{font-family:var(--mono);font-size:11px;color:var(--mute);font-weight:400}
 .refdes{font-family:var(--mono);font-size:12px;color:var(--mute);margin-top:3px}
 .shots{display:flex;flex-wrap:wrap;gap:10px;margin-top:13px}
@@ -416,6 +427,7 @@ function render(){
       html += '<span class="caret">▼</span>';
       html += '<span>' + esc(s.name) + '</span>';
       html += '<span class="count">' + s.shots.length + ' 张</span>';
+      html += '<span class="tag" data-tag></span>';
       html += '</div>';
       if (s.refDes) html += '<div class="refdes">' + esc(s.refDes) + '</div>';
       html += '<div class="shots">';
@@ -486,6 +498,12 @@ function paint(pi, si){
   var v = DATA.projects[pi].steps[si].verdict;
   var node = el.querySelector("[data-node]");
   node.className = "node" + (v ? " " + v : "");
+  var tag = el.querySelector("[data-tag]");
+  if (tag) {
+    var label = { pass:"正常", fail:"异常", unsure:"待定" };
+    tag.className = "tag" + (v ? " " + v : "");
+    tag.textContent = label[v] || "";
+  }
   el.querySelectorAll(".verdicts button").forEach(function(b){
     b.classList.toggle("on", b.getAttribute("data-v") === v);
   });

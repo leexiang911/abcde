@@ -1,16 +1,19 @@
 package com.sopcam.archive
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.media.MediaScannerConnection
 import android.os.Build
 import android.os.Environment
 import com.sopcam.meta.ImageMeta
-import org.json.JSONArray
-import org.json.JSONObject
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * 检修归档区。
@@ -336,6 +339,31 @@ object Archive {
         val targetSide = File(dir, old.nameWithoutExtension + ".json")
         new.renameTo(target) && (!newSide.exists() || newSide.renameTo(targetSide))
     }.getOrDefault(false)
+
+    /**
+     * 把归档原图真正转过来。
+     *
+     * 早先的做法是只在 json 里记角度、重烧时才应用 —— 无损、可反悔，
+     * 但缩略图、导出的原图、以后任何读这张图的地方都得各自记得应用一次，
+     * 漏一处就出现"大图是正的、列表里还是歪的"。
+     *
+     * 所以改成落到实处：转完写回原图，角度归零。
+     * 代价是一次重编码（质量 95，肉眼看不出），换来的是下游全都不用管。
+     */
+    fun rotateRaw(raw: File, degrees: Int): Boolean {
+        val d = ((degrees % 360) + 360) % 360
+        if (d == 0) return true
+        return runCatching {
+            val src = BitmapFactory.decodeFile(raw.path) ?: return false
+            val m = Matrix().apply { postRotate(d.toFloat()) }
+            val out = Bitmap.createBitmap(src, 0, 0, src.width, src.height, m, true)
+            if (out !== src) src.recycle()
+            raw.outputStream().use { out.compress(Bitmap.CompressFormat.JPEG, 95, it) }
+            out.recycle()
+            patchSidecar(raw) { put("rotation", 0) }
+            true
+        }.getOrDefault(false)
+    }
 
     fun sidecar(raw: File): JSONObject? = runCatching {
         val f = File(raw.parentFile, raw.nameWithoutExtension + ".json")

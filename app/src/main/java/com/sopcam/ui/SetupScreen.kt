@@ -260,18 +260,22 @@ fun TemplateEditScreen(
         )
         Spacer(Modifier.height(10.dp))
 
+        // 必须限高 + 内部滚动。
+        // 粘一份长 JSON 进来时，不限高的输入框会跟着无限长高，
+        // 把下面的保存按钮顶出屏幕 —— 流程都建不了。
         Box(
             Modifier
                 .fillMaxWidth()
-                .heightIn(min = 160.dp)
+                .heightIn(min = 140.dp, max = 240.dp)
                 .clip(RoundedCornerShape(8.dp))
                 .background(Panel)
                 .border(1.dp, Color(0xFF2A3037), RoundedCornerShape(8.dp))
+                .verticalScroll(rememberScrollState())
                 .padding(14.dp)
         ) {
             if (raw.isEmpty()) {
                 Text(
-                    "控制器编号\n控制器型号\n低压发波\n保险阻值\n母线容值\n上桥管压降",
+                    "一行一条，或者粘一份 JSON 流程进来",
                     color = Color(0xFF4A525C), fontSize = 15.sp, lineHeight = 24.sp
                 )
             }
@@ -279,7 +283,7 @@ fun TemplateEditScreen(
                 value = raw,
                 onValueChange = { raw = it },
                 modifier = Modifier.fillMaxWidth(),
-                textStyle = TextStyle(color = Color.White, fontSize = 15.sp, lineHeight = 24.sp),
+                textStyle = TextStyle(color = Color.White, fontSize = 14.sp, lineHeight = 21.sp),
                 cursorBrush = SolidColor(Amber)
             )
         }
@@ -293,7 +297,7 @@ fun TemplateEditScreen(
         )
         Spacer(Modifier.height(10.dp))
 
-        LazyColumn(Modifier.weight(1f)) {
+        LazyColumn(Modifier.weight(1f, fill = false).heightIn(max = 220.dp)) {
             items(parsed) { s ->
                 Row(
                     Modifier

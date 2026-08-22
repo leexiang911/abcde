@@ -839,10 +839,13 @@ class MainActivity : ComponentActivity() {
     private fun applyShotEdit(serialNo: String, item: ShotItem, anchor: Anchor, rotation: Int) {
         detailBusy = "应用中…"
         lifecycleScope.launch(Dispatchers.IO) {
-            Archive.patchSidecar(item.file) {
-                put("anchor", anchor.name)
-                put("rotation", rotation)
+            // 先把原图真正转过来（转完角度归零），再烧水印。
+            // 这样缩略图、导出的原图、成片三者永远一致，不用各处各记一次角度
+            if (rotation != 0) {
+                Archive.rotateRaw(item.file, rotation)
+                Thumbs.evict(item.file)
             }
+            Archive.patchSidecar(item.file) { put("anchor", anchor.name) }
             val ok = Restorer.one(this@MainActivity, item.file, overwrite = true) ==
                 Restorer.Outcome.WRITTEN
             withContext(Dispatchers.Main) {
