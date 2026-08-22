@@ -67,6 +67,7 @@ object Report {
                         .put("refDes", side.optString("stepRefDes"))
                         .put("shots", JSONArray())
                         .put("codes", JSONArray())
+                        .put("folder", folderOf(order, name))
                         .put("points", JSONArray())
                         .put("value", "")
                         .put("unit", "")
@@ -306,6 +307,13 @@ button.go{background:var(--mark);border-color:var(--mark);font-weight:600}
 .shots{display:flex;flex-wrap:wrap;gap:10px;margin-top:13px}
 /* 图片区禁用文字选择：框选时不会把标题和说明一起选进去，
    拖图片才拖得干净。图片本身不受影响，照样能拖能右键 */
+.folder{font-family:var(--mono);font-size:11.5px;color:var(--mute);
+  margin-top:9px;cursor:copy;display:inline-block;
+  padding:4px 9px;background:#fff;border:1px solid var(--rule)}
+.folder:hover{border-color:var(--ink);color:var(--ink)}
+.folder span{opacity:.65}
+.step.shut .folder{display:none}
+
 .shots{user-select:none;-webkit-user-select:none}
 figure{margin:0;width:172px}
 figure img{width:172px;height:129px;object-fit:cover;border:1px solid var(--rule);
@@ -463,6 +471,13 @@ function render(){
       html += '<span class="count">' + s.shots.length + ' 张</span>';
       html += '<span class="tag" data-tag></span>';
       html += '</div>';
+      if (s.folder) {
+        // 传图的正路：复制这一项的文件夹名，去文件管理器里找到它，
+        // Ctrl+A 一拖就完事。网页里做不到多选拖拽
+        html += '<div class="folder" data-folder="' + esc(s.folder) + '">';
+        html += '📁 ' + esc(s.folder) + '　<span>点一下复制文件夹名</span>';
+        html += '</div>';
+      }
       if (s.refDes) html += '<div class="refdes">' + esc(s.refDes) + '</div>';
       html += '<div class="shots">';
       s.shots.forEach(function(sh){
@@ -622,6 +637,12 @@ function bind(){
     el.addEventListener("click", function(){ copy(el.getAttribute("data-copy")); });
   });
 
+  document.querySelectorAll("[data-folder]").forEach(function(el){
+    el.addEventListener("click", function(){
+      copy(el.getAttribute("data-folder"));
+    });
+  });
+
   document.querySelectorAll("[data-sn]").forEach(function(b){
     b.addEventListener("click", function(){ copy(b.getAttribute("data-sn")); });
   });
@@ -710,8 +731,9 @@ render();
 </script>
 
 <footer>
-  <b>图片怎么传进系统：</b>点开大图后右键「复制图片」，或者直接从 <b>水印图</b> 文件夹拖进上传框。
-  从这个页面里拖图片是拖不进去的 —— 浏览器传的是链接不是文件。<br>
+  <b>图片怎么传进系统：</b>每一项下面有它的文件夹名，点一下复制，
+  去 <b>水印图</b> 里找到那个文件夹，Ctrl+A 全选拖进上传框。<br>
+  从这个页面里一次只能拖一张 —— 浏览器的拖拽一次只带一个元素，选中再多张也没用。<br>
   <b>数值填完别忘了点「复制整表」</b>，页面上的内容刷新就没了，不会自动保存。<br>
   <b>report.json</b> 和这个页面同目录，里面是同一份数据，方便以后用脚本或浏览器插件读。
 </footer>
