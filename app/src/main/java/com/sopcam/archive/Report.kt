@@ -55,14 +55,9 @@ object Report {
                 //  ① 元数据里的 stepGroup —— 拍照那刻按流程配置写下的，最可靠
                 //  ② 文件名 —— 用户改过名的话，那才是他要的（stepName 会停在旧步骤上）
                 //  ③ stepName —— 老照片的兜底
-                val fileStem = side.optString("fileName").ifBlank { raw.nameWithoutExtension }
-                val groupName = side.optString("stepGroup")
-                val name = groupName
-                    .ifBlank { labelOf(fileStem) }
-                    .ifBlank { side.optString("stepName") }
-                    .ifBlank { "自由拍摄" }
+                val (_, name) = groupOf(side, raw)
                 val point = side.optString("stepPoint")
-                val key = if (groupName.isNotBlank()) "g|$groupName" else "$order|$name"
+                val key = "$order|$name"
 
                 val group = steps.getOrPut(key) {
                     JSONObject()
@@ -81,9 +76,8 @@ object Report {
 
                 // 报表引用的是包里那份的路径，不是手机上的路径
                 val path = if (watermarked) {
-                    val name = side.optString("fileName")
-                        .ifBlank { raw.nameWithoutExtension }
-                    "$sn/水印图/$name.$imageExt"
+                    val stem = side.optString("fileName").ifBlank { raw.nameWithoutExtension }
+                    "$sn/水印图/${folderOf(order, name)}/$stem.$imageExt"
                 } else {
                     "$sn/原图/${raw.nameWithoutExtension}.jpg"
                 }
@@ -164,6 +158,43 @@ object Report {
         return TEMPLATE
             .replace("__TITLE__", titleOf(manifest))
             .replace("__DATA__", safe)
+    }
+
+    /** 这张照片归到哪一组：返回（序号，组名） */
+    private fun groupOf(side: JSONObject, raw: File): Pair<Int, String> {
+        val order = side.optInt("stepOrder", 0)
+        val fileStem = side.optString("fileName").ifBlank { raw.nameWithoutExtension }
+        val name = side.optString("stepGroup")
+            .ifBlank { labelOf(fileStem) }
+            .ifBlank { side.optString("stepName") }
+            .ifBlank { "自由拍摄" }
+        return order to name
+    }
+
+    private val illegalInName = Regex("[\\\\/:*?\"<>|\\r\\n\\t]")
+
+    /**
+     * 检查项在包里对应的子文件夹。
+     *
+     * 分文件夹是为了传图：在文件管理器里进这个文件夹，Ctrl+A 一拖就完事。
+     * 网页里做不到多选拖拽 —— 一次拖拽只能带一个元素，那是 HTML 拖放模型的
+     * 硬限制，选中再多张也没用。文件管理器没这个问题。
+     */
+    fun folderOf(order: Int, name: String): String {
+        val clean = name.replace(illegalInName, "").trim().take(40).ifBlank { "未命名" }
+        return if (order > 0) "%02d_%s".format(order, clean) else "00_$clean"
+    }
+
+    /** 成片文件名（不含扩展名）→ 它该进哪个子文件夹 */
+    fun folderMap(serialNo: String): Map<String, String> {
+        val out = LinkedHashMap<String, String>()
+        Archive.shots(serialNo).forEach { raw ->
+            val side = Archive.sidecar(raw) ?: return@forEach
+            val (order, name) = groupOf(side, raw)
+            val stem = side.optString("fileName").ifBlank { raw.nameWithoutExtension }
+            out[stem] = folderOf(order, name)
+        }
+        return out
     }
 
     /**
@@ -273,6 +304,9 @@ button.go{background:var(--mark);border-color:var(--mark);font-weight:600}
 .count{font-family:var(--mono);font-size:11px;color:var(--mute);font-weight:400}
 .refdes{font-family:var(--mono);font-size:12px;color:var(--mute);margin-top:3px}
 .shots{display:flex;flex-wrap:wrap;gap:10px;margin-top:13px}
+/* 图片区禁用文字选择：框选时不会把标题和说明一起选进去，
+   拖图片才拖得干净。图片本身不受影响，照样能拖能右键 */
+.shots{user-select:none;-webkit-user-select:none}
 figure{margin:0;width:172px}
 figure img{width:172px;height:129px;object-fit:cover;border:1px solid var(--rule);
   background:#fff;cursor:zoom-in;display:block}

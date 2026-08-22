@@ -85,10 +85,16 @@ object Exporter {
                 zip.setMethod(ZipOutputStream.STORED)
                 serials.forEach { sn ->
                     if (opt.watermarked) {
+                        // 按检查项分子文件夹：传图时在文件管理器里进那个文件夹，
+                        // Ctrl+A 一拖就完事，不用在几十张里挑
+                        val folders = Report.folderMap(sn)
                         watermarkedOf(sn).forEach { f ->
                             // 只有水印图压缩。原图归档是兜底数据，压了就失去意义了
                             val (bytes, ext) = transcode(f, settings)
-                            putBytes(zip, "$sn/水印图/${f.nameWithoutExtension}.$ext", bytes, f)
+                            val sub = folders[f.nameWithoutExtension]
+                            val path = if (sub != null) "$sn/水印图/$sub/${f.nameWithoutExtension}.$ext"
+                            else "$sn/水印图/${f.nameWithoutExtension}.$ext"
+                            putBytes(zip, path, bytes, f)
                             onProgress(++done, total)
                         }
                     }
