@@ -267,6 +267,28 @@ button.go{background:var(--mark);border-color:var(--mark);font-weight:600}
 
 /* 签名元素：左侧一条测量标尺，步骤号是刻度，结论是刻度上的实心节点。
    一眼从上往下扫就能看出这台机器卡在哪一项 */
+.sw{margin:0 0 8px;padding:14px 0 4px;border-bottom:1px solid var(--rule)}
+.swhead{font-size:13.5px;font-weight:600;margin-bottom:9px}
+.swhead span{font-weight:400;color:var(--mute);font-size:11.5px}
+.drop{border:1px dashed var(--rule);background:#fff;padding:16px;
+  text-align:center;color:var(--mute);font-size:12.5px;cursor:copy}
+.drop.hot{border-color:var(--mark);background:#FFFDF2;color:var(--ink)}
+.swrow{margin-top:10px}
+.swpics{display:flex;gap:14px;flex-wrap:wrap}
+.swout{margin-top:12px;display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap}
+.swlist{font-family:var(--mono);font-size:15px;line-height:1.85}
+.swline span{color:var(--mute)}
+.swline b{font-weight:600;cursor:copy;padding:1px 6px;
+  border-bottom:2px solid var(--mark)}
+.swline b:hover{background:#FFFDF2}
+.swcell{width:200px}
+.swcell b{display:block;font-family:var(--mono);font-size:11px;
+  letter-spacing:.12em;color:var(--mute);margin-bottom:5px}
+.swcell img{width:200px;height:132px;object-fit:contain;background:#fff;
+  border:1px solid var(--rule);cursor:zoom-in;display:block}
+.swcell .ver{font-family:var(--mono);font-size:12px;color:var(--mute);margin-top:5px}
+@media print{ .drop{display:none} }
+
 .step{display:grid;grid-template-columns:64px 1fr 260px;gap:0;
   border-bottom:1px solid var(--rule)}
 .rail{position:relative;padding:22px 0 22px 0}
@@ -458,6 +480,14 @@ function render(){
     html += '<span class="hint">数值和结论可以直接在页面上填，填完点「复制整表」粘进系统</span>';
     html += '</div>';
 
+    // 软件版本：本地网页没法自己列目录（file:// 下没有目录枚举，fetch 也被 CORS 拦），
+    // 但从文件管理器往网页里拖是给真 File 对象的，所以让人一次拖三张进来
+    html += '<div class="sw" id="sw' + pi + '">';
+    html += '<div class="swhead">软件版本 <span>可选 · 把 mcu / vcu / dc 三张图一起拖进来</span></div>';
+    html += '<div class="drop" data-drop="' + pi + '">拖到这里</div>';
+    html += '<div class="swrow" data-swrow="' + pi + '"></div>';
+    html += '</div>';
+
     p.steps.forEach(function(s, si){
       var num = s.order > 0 ? ("0" + s.order).slice(-2) : "—";
       html += '<div class="step" data-p="' + pi + '" data-s="' + si + '">';
@@ -631,11 +661,130 @@ function judge(pi, si){
   }
 }
 
-function bind(){
-  document.querySelectorAll(".copyable").forEach(function(el){
+/* 软件版本：一个框拖三张，按文件名分到 MCU / VCU / DC */
+var SW = {};
+
+function swParse(fileName){
+  // 去扩展名。不用正则的行尾锚点 —— 美元符号在 Kotlin 原始字符串里是模板占位
+  var dot = fileName.lastIndexOf(".");
+  var base = dot > 0 ? fileName.slice(0, dot) : fileName;
+  var m = base.match(/^\s*(mcu|vcu|dc)\b/i);
+  if (!m) return null;
+  var kind = m[1].toUpperCase();
+  var ver = base.match(/(\d+(?:\.\d+)+)/);
+  return { kind: kind, ver: ver ? ver[1] : "" };
+}
+
+/* 版本号按 vcu:123663 这种形状排，一行一条，整段能一次复制 */
+function swLines(pi){
+  var store = SW[pi] || {};
+  var out = [];
+  ["MCU","VCU","DC"].forEach(function(k){
+    var it = store[k];
+    if (it && it.plain) out.push(k.toLowerCase() + ":" + it.plain);
+  });
+  return out;
+}
+
+function swRender(pi){
+  var row = document.querySelector('[data-swrow="' + pi + '"]');
+  if (!row) return;
+  var store = SW[pi] || {};
+
+  var pics = "";
+  ["MCU","VCU","DC"].forEach(function(k){
+    var it = store[k];
+    if (!it) return;
+    pics += '<div class="swcell">';
+    pics += '<b>' + k + '</b>';
+    pics += '<img src="' + it.url + '" alt="' + k + '" data-full="' + it.url + '">';
+    pics += '<div class="ver">' + esc(it.ver || "没读出版本号") + '</div>';
+    pics += '</div>';
+  });
+
+  var lines = swLines(pi);
+  var block = "";
+  if (lines.length) {
+    block += '<div class="swout">';
+    block += '<div class="swlist">';
+    lines.forEach(function(t){
+      var num = t.split(":")[1];
+      // 单条点一下只复制数字，填进系统时不用再删前缀
+      block += '<div class="swline"><span>' + esc(t.split(":")[0]) + ':</span>' +
+               '<b class="copyable" data-copy="' + esc(num) + '">' + esc(num) + '</b></div>';
+    });
+    block += '</div>';
+    block += '<button data-swall="' + pi + '">复制软件版本号</button>';
+    block += '</div>';
+  }
+
+  row.innerHTML = '<div class="swpics">' + pics + '</div>' + block;
+  bindCopy(row);
+  bindZoom(row);
+  row.querySelectorAll("[data-swall]").forEach(function(b){
+    b.addEventListener("click", function(){ copy(swLines(pi).join("\n")); });
+  });
+}
+
+function swTake(pi, files){
+  SW[pi] = SW[pi] || {};
+  Array.prototype.forEach.call(files, function(f){
+    if (!/^image\//.test(f.type)) return;
+    var info = swParse(f.name);
+    if (!info) return;
+    SW[pi][info.kind] = {
+      url: URL.createObjectURL(f),
+      ver: info.ver,
+      // 去掉点号 —— 填进系统时要的是纯数字
+      plain: info.ver ? info.ver.replace(/\./g, "") : ""
+    };
+  });
+  swRender(pi);
+}
+
+function bindCopy(root){
+  root.querySelectorAll(".copyable").forEach(function(el){
+    if (el._c) return;
+    el._c = 1;
     el.style.cursor = "copy";
     el.addEventListener("click", function(){ copy(el.getAttribute("data-copy")); });
   });
+}
+
+function bindZoom(root){
+  var box = document.getElementById("box");
+  root.querySelectorAll("[data-full]").forEach(function(img){
+    if (img._z) return;
+    img._z = 1;
+    img.addEventListener("click", function(){
+      box.querySelector("img").src = img.getAttribute("data-full");
+      box.querySelector(".cap").textContent = "右键可以复制图片";
+      box.style.display = "flex";
+    });
+  });
+}
+
+function bind(){
+  document.querySelectorAll("[data-drop]").forEach(function(z){
+    var pi = +z.getAttribute("data-drop");
+    ["dragenter","dragover"].forEach(function(ev){
+      z.addEventListener(ev, function(e){ e.preventDefault(); z.classList.add("hot"); });
+    });
+    ["dragleave","drop"].forEach(function(ev){
+      z.addEventListener(ev, function(e){ e.preventDefault(); z.classList.remove("hot"); });
+    });
+    z.addEventListener("drop", function(e){
+      if (e.dataTransfer && e.dataTransfer.files) swTake(pi, e.dataTransfer.files);
+    });
+    z.addEventListener("click", function(){
+      var inp = document.createElement("input");
+      inp.type = "file"; inp.multiple = true; inp.accept = "image/*";
+      inp.addEventListener("change", function(){ swTake(pi, inp.files); });
+      inp.click();
+    });
+  });
+
+  bindCopy(document);
 
   document.querySelectorAll("[data-folder]").forEach(function(el){
     el.addEventListener("click", function(){
@@ -693,14 +842,8 @@ function bind(){
     });
   });
 
+  bindZoom(document);
   var box = document.getElementById("box");
-  document.querySelectorAll("[data-full]").forEach(function(img){
-    img.addEventListener("click", function(){
-      box.querySelector("img").src = img.getAttribute("data-full");
-      box.querySelector(".cap").textContent = "右键可以复制图片";
-      box.style.display = "flex";
-    });
-  });
   box.addEventListener("click", function(){ box.style.display = "none"; });
   document.addEventListener("keydown", function(e){
     if (e.key === "Escape") box.style.display = "none";
@@ -711,7 +854,10 @@ function bind(){
 function tsv(pi){
   var p = DATA.projects[pi];
   var label = { pass:"正常", fail:"异常", unsure:"待定", "":"" };
-  var rows = [["序号","检修项目","位号","读数","结论","备注","图片"].join("\t")];
+  var rows = [];
+  swLines(pi).forEach(function(t){ rows.push(t); });
+  if (rows.length) rows.push("");
+  rows.push(["序号","检修项目","位号","读数","结论","备注","图片"].join("\t"));
   p.steps.forEach(function(s){
     var files = s.shots.map(function(x){ return x.name; }).join(" ");
     var reading = (s.points && s.points.length)
