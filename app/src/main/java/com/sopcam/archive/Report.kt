@@ -320,7 +320,7 @@ figure img{width:172px;height:129px;object-fit:cover;border:1px solid var(--rule
   background:#fff;cursor:zoom-in;display:block}
 figure img:hover{border-color:var(--ink)}
 figcaption{font-family:var(--mono);font-size:10.5px;color:var(--mute);
-  margin-top:4px;word-break:break-all;line-height:1.35}
+  margin-top:4px;text-align:center}
 .code{display:inline-block;margin-top:8px;font-family:var(--mono);font-size:12px;
   padding:3px 8px;background:#fff;border:1px solid var(--rule);cursor:copy}
 .code:hover{border-color:var(--ink)}
@@ -483,7 +483,7 @@ function render(){
       s.shots.forEach(function(sh){
         html += '<figure>';
         html += '<img src="' + esc(sh.file) + '" alt="' + esc(s.name) + '" data-full="' + esc(sh.file) + '">';
-        html += '<figcaption>' + esc(sh.time) + ' · ' + esc(sh.name) + '</figcaption>';
+        html += '<figcaption>' + esc(sh.time) + '</figcaption>';
         html += '</figure>';
       });
       html += '</div>';
@@ -697,8 +697,7 @@ function bind(){
   document.querySelectorAll("[data-full]").forEach(function(img){
     img.addEventListener("click", function(){
       box.querySelector("img").src = img.getAttribute("data-full");
-      box.querySelector(".cap").textContent =
-        img.getAttribute("data-full") + "   右键可以复制图片";
+      box.querySelector(".cap").textContent = "右键可以复制图片";
       box.style.display = "flex";
     });
   });

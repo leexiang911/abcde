@@ -100,6 +100,30 @@ fun ExportSettingsSheet(
 
             Spacer(Modifier.height(18.dp))
             Text(
+                "尺寸",
+                color = if (settings.compresses) Color.White else Color(0xFF4A525C),
+                fontSize = 14.sp
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "缩尺寸省的体积比降质量多得多，而且数码管照样看得清",
+                color = Steel, fontSize = 11.sp
+            )
+            Spacer(Modifier.height(8.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                ExportSettings.SIDES.forEach { px ->
+                    Chip(
+                        label = if (px == 0) "原尺寸" else "$px",
+                        active = settings.maxSide == px && settings.compresses,
+                        enabled = settings.compresses,
+                        modifier = Modifier.weight(1f)
+                    ) { onChange(settings.copy(maxSide = px)) }
+                }
+            }
+
+            Spacer(Modifier.height(18.dp))
+            Text(
                 "格式",
                 color = if (settings.compresses) Color.White else Color(0xFF4A525C),
                 fontSize = 14.sp
@@ -168,19 +192,30 @@ private fun Chip(
     label: String,
     active: Boolean,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
     Text(
         label,
-        color = if (active) Ink else Color.White,
+        color = when {
+            !enabled -> Color(0xFF4A525C)
+            active -> Ink
+            else -> Color.White
+        },
         fontSize = 13.sp,
         fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
         textAlign = TextAlign.Center,
         maxLines = 1,
         modifier = modifier
             .clip(RoundedCornerShape(6.dp))
-            .background(if (active) Amber else Color(0xFF262D35))
-            .clickable(onClick = onClick)
+            .background(
+                when {
+                    !enabled -> Color(0xFF1A1F25)
+                    active -> Amber
+                    else -> Color(0xFF262D35)
+                }
+            )
+            .clickable(enabled = enabled, onClick = onClick)
             .padding(vertical = 11.dp)
     )
 }

@@ -37,15 +37,25 @@ data class ExportSettings(
     val htmlReport: Boolean = true,
     /** Excel 报表，下一轮做 */
     val excelReport: Boolean = false,
+    /**
+     * 长边上限，0 表示不缩。
+     *
+     * 缩尺寸省的体积远比降质量多：同一张 12MP，原尺寸 80% 是 1.5–2.5MB，
+     * 缩到 2048 长边 85% 只有 300–500KB。而且对读数码管更友好 ——
+     * 数字是大块笔画，缩小照样清楚，质量降到 50% 反而让边缘出块状伪影。
+     */
+    val maxSide: Int = 2048,
 ) {
     val compresses: Boolean get() = quality in 1..99
 
     /** WebP 没法注入 XMP，选了它元数据必然丢 */
     val metadataPossible: Boolean get() = !compresses || format == ExportFormat.JPEG
 
+    fun sideLabel(): String = if (maxSide <= 0) "原尺寸" else "长边 $maxSide"
+
     fun summary(): String = when {
         !compresses -> "不压缩"
-        else -> "${format.label} · $quality%"
+        else -> "${format.label} · $quality% · ${sideLabel()}"
     }
 
     fun toJson(): JSONObject = JSONObject()
@@ -54,9 +64,11 @@ data class ExportSettings(
         .put("keepMetadata", keepMetadata)
         .put("htmlReport", htmlReport)
         .put("excelReport", excelReport)
+        .put("maxSide", maxSide)
 
     companion object {
         val LEVELS = listOf(100, 95, 80, 75, 65, 60, 50)
+        val SIDES = listOf(0, 3000, 2560, 2048, 1600)
 
         fun from(o: JSONObject) = ExportSettings(
             quality = o.optInt("quality", 100).coerceIn(1, 100),
@@ -64,6 +76,7 @@ data class ExportSettings(
             keepMetadata = o.optBoolean("keepMetadata", true),
             htmlReport = o.optBoolean("htmlReport", true),
             excelReport = false,   // 还没实现，读到 true 也当 false
+            maxSide = o.optInt("maxSide", 2048),
         )
     }
 }

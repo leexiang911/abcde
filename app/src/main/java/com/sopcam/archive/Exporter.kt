@@ -14,9 +14,17 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.zip.CRC32
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 
 /**
  * 把检修项目打包导出。
@@ -64,16 +72,23 @@ object Exporter {
      * 用 STORED 不压缩：JPEG 已经压过了，再 deflate 一遍烧半天 CPU 只省 1%，
      * zip 在这里的价值是"打成一个包方便发"，不是省空间。
      */
-    fun export(
+    suspend fun export(
         serials: List<String>,
         opt: Options,
         settings: ExportSettings = ExportSettings(),
         template: SopTemplate? = null,
         onProgress: (Int, Int) -> Unit = { _, _ -> },
-    ): File? {
-        if (serials.isEmpty() || !opt.any) return null
+    ): File? = coroutineScope {
+        if (serials.isEmpty() || !opt.any) return@coroutineScope null
         val total = plan(serials, opt).fileCount
-        if (total == 0) return null
+        if (total == 0) return@coroutineScope null
+
+        // 编码是纯 CPU 活儿，几十张之间互不相干，没理由排队。
+        // 但不能全放开：每张解出来的位图都占内存，并行度按核数走并封顶，
+        // 免得一次握着七八张大图把内存顶爆
+        val lanes = Runtime.getRuntime().availableProcessors().coerceIn(2, 6)
+        val gate = Semaphore(lanes)
+        val counted = AtomicInteger(0)
 
         val dir = exportDir().apply { if (!exists()) mkdirs() }
         val name = if (serials.size == 1) serials.first() else "${serials.size}个项目"
@@ -88,21 +103,35 @@ object Exporter {
                         // 按检查项分子文件夹：传图时在文件管理器里进那个文件夹，
                         // Ctrl+A 一拖就完事，不用在几十张里挑
                         val folders = Report.folderMap(sn)
-                        watermarkedOf(sn).forEach { f ->
-                            // 只有水印图压缩。原图归档是兜底数据，压了就失去意义了
-                            val (bytes, ext) = transcode(f, settings)
+                        // 先并行编码，再顺序写盘 —— zip 流本身不能并发写
+                        val cooked = runBlocking {
+                            watermarkedOf(sn).map { f ->
+                                async(Dispatchers.Default) {
+                                    gate.withPermit {
+                                        // 只有水印图压缩。原图是兜底数据，压了就失去意义
+                                        val r = transcode(f, settings)
+                                        onProgress(counted.incrementAndGet(), total)
+                                        f to r
+                                    }
+                                }
+                            }.awaitAll()
+                        }
+                        cooked.forEach { pair ->
+                            val f = pair.first
+                            val (bytes, ext) = pair.second
                             val sub = folders[f.nameWithoutExtension]
                             val path = if (sub != null) "$sn/水印图/$sub/${f.nameWithoutExtension}.$ext"
                             else "$sn/水印图/${f.nameWithoutExtension}.$ext"
                             putBytes(zip, path, bytes, f)
-                            onProgress(++done, total)
+                            done++
                         }
                     }
                     if (opt.original) {
                         originalsOf(sn).forEach { f ->
                             // .sopraw 只是为了躲开相册扫描，发给别人得能直接打开
                             putBytes(zip, "$sn/原图/${f.nameWithoutExtension}.jpg", f.readBytes(), f)
-                            onProgress(++done, total)
+                            onProgress(counted.incrementAndGet(), total)
+                            done++
                         }
                     }
                 }
@@ -125,9 +154,9 @@ object Exporter {
             }
         }.onFailure {
             out.delete()
-            return null
+            return@coroutineScope null
         }
-        return out
+        out
     }
 
     /**
@@ -135,10 +164,44 @@ object Exporter {
      *
      * 返回字节和该用的扩展名。不压缩时原样返回，连解码都省了。
      */
+    /**
+     * 按长边上限解码。
+     *
+     * 关键在 inSampleSize：让解码器直接吐出 1/2、1/4 的图，
+     * 而不是先解出整张 12MP 再缩 —— 那一步既慢又占内存，
+     * 并行几张时最容易在这儿 OOM。
+     */
+    private fun decodeCapped(path: String, maxSide: Int): Bitmap? = runCatching {
+        if (maxSide <= 0) return BitmapFactory.decodeFile(path)
+
+        val probe = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(path, probe)
+        val long = maxOf(probe.outWidth, probe.outHeight)
+        if (long <= 0) return null
+
+        var sample = 1
+        while (long / (sample * 2) >= maxSide) sample *= 2
+
+        val bmp = BitmapFactory.decodeFile(
+            path, BitmapFactory.Options().apply { inSampleSize = sample }
+        ) ?: return null
+
+        // 降采样只能按 2 的幂次，剩下的零头再精确缩一次
+        val cur = maxOf(bmp.width, bmp.height)
+        if (cur <= maxSide) return bmp
+        val f = maxSide.toFloat() / cur
+        Bitmap.createScaledBitmap(
+            bmp,
+            (bmp.width * f).toInt().coerceAtLeast(1),
+            (bmp.height * f).toInt().coerceAtLeast(1),
+            true
+        ).also { if (it !== bmp) bmp.recycle() }
+    }.getOrNull()
+
     private fun transcode(src: File, st: ExportSettings): Pair<ByteArray, String> {
         if (!st.compresses) return src.readBytes() to "jpg"
 
-        val bmp = BitmapFactory.decodeFile(src.path) ?: return src.readBytes() to "jpg"
+        val bmp = decodeCapped(src.path, st.maxSide) ?: return src.readBytes() to "jpg"
         val fmt = if (st.format == ExportFormat.WEBP) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 Bitmap.CompressFormat.WEBP_LOSSY
