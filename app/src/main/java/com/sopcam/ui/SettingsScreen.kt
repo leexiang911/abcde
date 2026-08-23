@@ -160,6 +160,15 @@ fun SettingsScreen(
             checked = settings.shutterSound,
         ) { onChange(settings.copy(shutterSound = it)) }
 
+        Spacer(Modifier.height(10.dp))
+
+        SwitchRow(
+            title = "拍完停一下",
+            desc = "每拍一张先停在预览上：拍错了当场重拍，还能顺手写句备注。" +
+                "备注用系统输入法，想说话就点输入法的麦克风。",
+            checked = settings.confirmEachShot,
+        ) { onChange(settings.copy(confirmEachShot = it)) }
+
         Spacer(Modifier.height(28.dp))
         SectionTitle("扫码")
 

@@ -155,6 +155,13 @@ data class AppSettings(
     val shutterVibrate: Boolean = true,
     /** 快门提示音。车间有噪音可能听不见，但戴手套时震动也不明显，两个都留 */
     val shutterSound: Boolean = true,
+    /**
+     * 拍完停一下，确认这张要不要留、顺手写句备注。
+     *
+     * 发现拍错通常就在按下快门那一瞬间，这时候重拍最省事 ——
+     * 等走到下一项再回头，就得退出相机翻项目了。
+     */
+    val confirmEachShot: Boolean = false,
 ) {
     /** 两行都关等于没水印，那就别白跑一趟烧录 */
     val burnsAnything: Boolean
@@ -169,6 +176,7 @@ data class AppSettings(
         .put("scanInViewfinder", scanInViewfinder)
         .put("shutterVibrate", shutterVibrate)
         .put("shutterSound", shutterSound)
+        .put("confirmEachShot", confirmEachShot)
 
     companion object {
         fun from(o: JSONObject): AppSettings {
@@ -183,6 +191,7 @@ data class AppSettings(
                 scanInViewfinder = o.optBoolean("scanInViewfinder", true),
                 shutterVibrate = o.optBoolean("shutterVibrate", true),
                 shutterSound = o.optBoolean("shutterSound", true),
+            confirmEachShot = o.optBoolean("confirmEachShot", false),
             )
         }
     }

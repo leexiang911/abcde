@@ -29,6 +29,8 @@ data class ImageMeta(
     val stepPoint: String = "",
     /** 报表归到哪一行，例如 "上桥管压降" */
     val stepGroup: String = "",
+    /** 拍完当场写的备注 */
+    val note: String = "",
     val codeValue: String = "",
     val codeFormat: String = "",
     val anchor: String = "",
@@ -71,6 +73,7 @@ object Xmp {
                 if (meta.stepRefDes.isNotBlank()) add("sopcam:StepRefDes" to meta.stepRefDes)
             if (meta.stepPoint.isNotBlank()) add("sopcam:StepPoint" to meta.stepPoint)
             if (meta.stepGroup.isNotBlank()) add("sopcam:StepGroup" to meta.stepGroup)
+            if (meta.note.isNotBlank()) add("sopcam:Note" to meta.note)
             }
             if (meta.codeValue.isNotBlank()) {
                 add("sopcam:CodeValue" to meta.codeValue)

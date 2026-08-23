@@ -109,6 +109,7 @@ object Archive {
                 .put("stepRefDes", meta.stepRefDes)
                 .put("stepPoint", meta.stepPoint)
                 .put("stepGroup", meta.stepGroup)
+                .put("note", meta.note)
                 .put("codeValue", meta.codeValue)
                 .put("codeFormat", meta.codeFormat)
                 .put("anchor", meta.anchor)

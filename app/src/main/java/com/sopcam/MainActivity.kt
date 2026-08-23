@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.location.LocationManager
 import android.net.Uri
@@ -46,6 +47,7 @@ import com.sopcam.capture.PendingShot
 import com.sopcam.capture.ScannedCode
 import com.sopcam.capture.ShutterFeedback
 import com.sopcam.capture.shoot
+import com.sopcam.capture.shootBytes
 import com.sopcam.crash.CrashLogger
 import com.sopcam.meta.ImageMeta
 import com.sopcam.meta.PendingCleaner
@@ -78,6 +80,7 @@ import com.sopcam.ui.RetakeConfirmScreen
 import com.sopcam.ui.ScanScreen
 import com.sopcam.ui.SettingsScreen
 import com.sopcam.ui.SetupScreen
+import com.sopcam.ui.ShotConfirmScreen
 import com.sopcam.ui.ShotItem
 import com.sopcam.ui.TemplateEditScreen
 import com.sopcam.ui.readShots
@@ -85,6 +88,7 @@ import com.sopcam.watermark.Anchor
 import com.sopcam.watermark.OrientationController
 import com.sopcam.watermark.TopEdge
 import com.sopcam.watermark.WatermarkContent
+import com.sopcam.watermark.WatermarkRenderer
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -97,7 +101,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private enum class Screen {
-    SETUP, TEMPLATE_EDIT, SETTINGS, CAMERA, SCAN, PROJECTS, PROJECT_DETAIL, RETAKE_CONFIRM, AI_LAB
+    SETUP, TEMPLATE_EDIT, SETTINGS, CAMERA, SCAN, PROJECTS, PROJECT_DETAIL, RETAKE_CONFIRM,
+    SHOT_CONFIRM, AI_LAB
 }
 
 /** 开工页上弹出的哪个选择器 */
@@ -155,6 +160,14 @@ class MainActivity : ComponentActivity() {
     private var retakeTarget by mutableStateOf<File?>(null)
     private var retakeNew by mutableStateOf<File?>(null)
     private var retakeNewPhoto by mutableStateOf<String?>(null)
+
+    // 开着"拍完停一下"时，照片先攥在手里不落盘，等人点了「留下」才入队
+    private var heldPreview by mutableStateOf<Bitmap?>(null)
+    private var heldNote by mutableStateOf("")
+    private var heldLabel by mutableStateOf("")
+    private var heldBuild: ((String) -> PendingShot)? = null
+    private var heldStep: SopStep? = null
+    private var heldTaken = 0
     private var projectQuery by mutableStateOf("")
     private var statusFilter by mutableStateOf<Archive.Status?>(null)
     // busy = 正在忙，按钮要禁用；note = 干完的提示，几秒后自己消失，不禁用任何东西。
@@ -293,6 +306,7 @@ class MainActivity : ComponentActivity() {
                         openProject = null
                         screen = Screen.PROJECTS
                     }
+                    Screen.SHOT_CONFIRM -> dropHeld()
                     Screen.AI_LAB -> screen = Screen.SETTINGS
                     Screen.PROJECTS -> {
                         picked = emptySet()
@@ -579,6 +593,15 @@ class MainActivity : ComponentActivity() {
                         }
                     )
                 }
+
+                Screen.SHOT_CONFIRM -> ShotConfirmScreen(
+                    preview = heldPreview,
+                    stepLabel = heldLabel,
+                    note = heldNote,
+                    onNote = { heldNote = it },
+                    onRetake = ::dropHeld,
+                    onAccept = ::keepHeld
+                )
 
                 Screen.RETAKE_CONFIRM -> retakeTarget?.let { old ->
                     RetakeConfirmScreen(
@@ -1160,15 +1183,14 @@ class MainActivity : ComponentActivity() {
             serialNo, activeModel?.name ?: "", platformOption?.label ?: "", activeFault?.name ?: ""
         )
 
-        queueDepth += 1
-        imageCapture.shoot(pipeline) { bytes ->
+        val build: (ByteArray, String) -> PendingShot = { bytes, note ->
             PendingShot(
                 jpeg = bytes,
                 fileName = shotName,
                 relativePath = shotPath,
                 content = shotContent,
                 anchor = shotAnchor,
-                meta = meta,
+                meta = meta.copy(note = note),
                 burnWatermark = shotBurn,
                 keepOriginal = shotKeepRaw,
                 headline = shotContent.headline,
@@ -1179,12 +1201,59 @@ class MainActivity : ComponentActivity() {
         // 单次对焦到此为止，持久锁留给下一张
         if (focusSpot?.locked == false) releaseFocus()
 
-        if (step != null) {
-            val next = taken + 1
-            shotCounts = shotCounts + (step.order to next)
-            if (next >= step.shots && stepIndex < activeSteps.lastIndex) stepIndex += 1
-            persist()
+        if (!settings.confirmEachShot) {
+            queueDepth += 1
+            imageCapture.shoot(pipeline) { build(it, "") }
+            advanceStep(step, taken)
+            return
         }
+
+        // 先攥住，等人过目。这时候不入队、不推进步骤 ——
+        // 万一点了重拍，什么痕迹都不该留下
+        heldStep = step
+        heldTaken = taken
+        heldNote = ""
+        heldLabel = step?.label() ?: "自由拍摄"
+        heldPreview = null
+        imageCapture.shootBytes(pipeline.captureExecutor) { bytes ->
+            heldBuild = { note -> build(bytes, note) }
+            // 缩到 1400 就够看清有没有糊，解全尺寸纯属让人干等
+            val thumb = runCatching { WatermarkRenderer.decodeUpright(bytes, 1400) }.getOrNull()
+            lifecycleScope.launch(Dispatchers.Main) {
+                heldPreview = thumb
+                screen = Screen.SHOT_CONFIRM
+            }
+        }
+    }
+
+    private fun advanceStep(step: SopStep?, taken: Int) {
+        if (step == null) return
+        val next = taken + 1
+        shotCounts = shotCounts + (step.order to next)
+        if (next >= step.shots && stepIndex < activeSteps.lastIndex) stepIndex += 1
+        persist()
+    }
+
+    /** 留下：这时候才入队落盘，并推进到下一步 */
+    private fun keepHeld() {
+        heldBuild?.let { make ->
+            queueDepth += 1
+            pipeline.submit(make(heldNote))
+            advanceStep(heldStep, heldTaken)
+        }
+        clearHeld()
+    }
+
+    /** 重拍：直接丢掉，步骤不动，回相机重来 */
+    private fun dropHeld() = clearHeld()
+
+    private fun clearHeld() {
+        heldPreview?.recycle()
+        heldPreview = null
+        heldBuild = null
+        heldStep = null
+        heldNote = ""
+        screen = Screen.CAMERA
     }
 
     override fun onStart() {

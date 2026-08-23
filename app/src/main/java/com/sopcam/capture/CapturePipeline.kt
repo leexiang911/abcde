@@ -340,18 +340,23 @@ object Optics {
     }
 }
 
-/** 快门：只取字节、只入队，不做任何图像处理 */
-fun ImageCapture.shoot(pipeline: CapturePipeline, shot: (ByteArray) -> PendingShot) {
-    takePicture(pipeline.captureExecutor, object : ImageCapture.OnImageCapturedCallback() {
+/** 快门：只取字节，不做任何图像处理。拿到之后干什么由调用方决定 */
+fun ImageCapture.shootBytes(executor: Executor, onBytes: (ByteArray) -> Unit) {
+    takePicture(executor, object : ImageCapture.OnImageCapturedCallback() {
         override fun onCaptureSuccess(image: ImageProxy) {
             val buf = image.planes[0].buffer
             val bytes = ByteArray(buf.remaining()).also { buf.get(it) }
             image.close()
-            pipeline.submit(shot(bytes))
+            onBytes(bytes)
         }
 
         override fun onError(exception: ImageCaptureException) {
             exception.printStackTrace()
         }
     })
+}
+
+/** 拍完直接入队。开着"拍完停一下"时不走这条 —— 那时候要先让人过目 */
+fun ImageCapture.shoot(pipeline: CapturePipeline, shot: (ByteArray) -> PendingShot) {
+    shootBytes(pipeline.captureExecutor) { pipeline.submit(shot(it)) }
 }
