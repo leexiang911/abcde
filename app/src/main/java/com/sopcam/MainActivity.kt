@@ -126,6 +126,8 @@ class MainActivity : ComponentActivity() {
 
     private var serialNo by mutableStateOf("")
     private var faultId by mutableStateOf("")
+    /** 当前进度属于哪台控制器。换机器要清空，否则新机器一进去就"已经拍到第 8 项" */
+    private var progressSerial by mutableStateOf("")
     private var modelId by mutableStateOf("")
     private var platformId by mutableStateOf("")
     private var templateId by mutableStateOf("")
@@ -238,6 +240,7 @@ class MainActivity : ComponentActivity() {
             modelId = s.modelId
             platformId = s.platformId
             faultId = s.faultId
+            progressSerial = s.progressSerial
             templateId = s.templateId
             stepIndex = s.stepIndex
             shotCounts = s.shotCounts
@@ -252,7 +255,7 @@ class MainActivity : ComponentActivity() {
                     // 重拍模式：这一张就是新拍的那张，捞出来去确认页
                     retakeTarget?.let { old ->
                         if (retakeNew == null) {
-                            retakeNew = Archive.shots(serialNo)
+                            retakeNew = Archive.shots(openProject?.serialNo ?: serialNo)
                                 .filter { it.absolutePath != old.absolutePath }
                                 .maxByOrNull { it.lastModified() }
                             retakeNewPhoto = saved.displayName
@@ -365,6 +368,7 @@ class MainActivity : ComponentActivity() {
                             templateId = ""
                             stepIndex = 0
                             shotCounts = emptyMap()
+                            progressSerial = serialNo
                             persist()
                             refreshArchiveWarning()
                             screen = Screen.CAMERA
@@ -376,6 +380,7 @@ class MainActivity : ComponentActivity() {
                             SopStore.saveTemplates(this, templates.toList())
                         },
                         onStart = {
+                            resetProgressIfNewUnit()
                             persist()
                             refreshArchiveWarning()
                             screen = Screen.CAMERA
@@ -883,24 +888,32 @@ class MainActivity : ComponentActivity() {
     private fun commitRetake() {
         val old = retakeTarget ?: return
         val new = retakeNew ?: return
+        // 用被重拍那张所属项目的序列号，不是当前会话的 ——
+        // 你可能正在测 B 机器，却回头重拍 A 机器里的某一张
+        val owner = openProject?.serialNo ?: serialNo
         detailBusy = "替换中…"
         lifecycleScope.launch(Dispatchers.IO) {
             // 相机刚才为新照片另写了一张成片，名字跟旧的不同，先清掉
             retakeNewPhoto?.let { name ->
                 Gallery.delete(
                     this@MainActivity,
-                    Gallery.photosOf(serialNo).filter { it.name == name }
+                    Gallery.photosOf(owner).filter { it.name == name }
                 )
             }
             val ok = Archive.replaceShot(old, new)
             if (ok) Restorer.one(this@MainActivity, old, overwrite = true)
+
+            // 新照片接管了旧照片的路径 —— 路径没变，缩略图缓存就还是旧图。
+            // 不清的话文件明明换了，网格里看到的还是残影
+            Thumbs.evict(old)
+            Thumbs.evict(new)
 
             withContext(Dispatchers.Main) {
                 detailBusy = null
                 retakeTarget = null
                 retakeNew = null
                 retakeNewPhoto = null
-                openShots = readShots(serialNo)
+                openShots = readShots(owner)
                 projects = Archive.list()
                 lastSaved = if (ok) "已替换" else "替换失败"
                 screen = Screen.PROJECT_DETAIL
@@ -911,13 +924,14 @@ class MainActivity : ComponentActivity() {
     /** 放弃新拍的：连它的归档和成片一起清掉，当作没拍过 */
     private fun discardRetake() {
         val new = retakeNew
+        val owner = openProject?.serialNo ?: serialNo
         detailBusy = "清理中…"
         lifecycleScope.launch(Dispatchers.IO) {
-            new?.let { Purge.shot(it) }
+            new?.let { Purge.shot(it); Thumbs.evict(it) }
             retakeNewPhoto?.let { name ->
                 Gallery.delete(
                     this@MainActivity,
-                    Gallery.photosOf(serialNo).filter { it.name == name }
+                    Gallery.photosOf(owner).filter { it.name == name }
                 )
             }
             withContext(Dispatchers.Main) {
@@ -925,7 +939,7 @@ class MainActivity : ComponentActivity() {
                 retakeTarget = null
                 retakeNew = null
                 retakeNewPhoto = null
-                openShots = readShots(serialNo)
+                openShots = readShots(owner)
                 screen = Screen.PROJECT_DETAIL
             }
         }
@@ -998,7 +1012,10 @@ class MainActivity : ComponentActivity() {
     private fun persist() {
         SopStore.saveSession(
             this,
-            Session(serialNo, modelId, platformId, faultId, templateId, stepIndex, shotCounts)
+            Session(
+                serialNo, modelId, platformId, faultId, progressSerial,
+                templateId, stepIndex, shotCounts
+            )
         )
     }
 
@@ -1224,6 +1241,19 @@ class MainActivity : ComponentActivity() {
                 screen = Screen.SHOT_CONFIRM
             }
         }
+    }
+
+    /**
+     * 换了控制器就把流程进度归零。
+     *
+     * 以前只在换模板时清进度 —— 同一份流程接着测下一台机器，
+     * 进度会原样继承，新机器一进相机就显示"已经拍到第 8 项"。
+     */
+    private fun resetProgressIfNewUnit() {
+        if (progressSerial == serialNo) return
+        stepIndex = 0
+        shotCounts = emptyMap()
+        progressSerial = serialNo
     }
 
     private fun advanceStep(step: SopStep?, taken: Int) {

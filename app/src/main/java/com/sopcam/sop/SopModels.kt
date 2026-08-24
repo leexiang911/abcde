@@ -139,6 +139,8 @@ data class Session(
     val modelId: String = "",
     val platformId: String = "",
     val faultId: String = "",
+    /** 当前这份进度是哪台控制器的。换了机器就该从头开始 */
+    val progressSerial: String = "",
     val templateId: String = "",
     val stepIndex: Int = 0,
     /** key 是步骤 order，value 是已拍张数 */
@@ -149,6 +151,7 @@ data class Session(
         .put("modelId", modelId)
         .put("platformId", platformId)
         .put("faultId", faultId)
+        .put("progressSerial", progressSerial)
         .put("templateId", templateId)
         .put("stepIndex", stepIndex)
         .put("shotCounts", JSONObject().apply {
@@ -165,6 +168,7 @@ data class Session(
                 modelId = o.optString("modelId"),
                 platformId = o.optString("platformId"),
                 faultId = o.optString("faultId"),
+                progressSerial = o.optString("progressSerial"),
                 templateId = o.optString("templateId"),
                 stepIndex = o.optInt("stepIndex", 0),
                 shotCounts = map,
