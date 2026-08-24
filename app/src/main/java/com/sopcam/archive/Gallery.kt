@@ -3,6 +3,7 @@ package com.sopcam.archive
 import android.content.Context
 import android.media.MediaScannerConnection
 import android.os.Environment
+import com.sopcam.sop.FileNaming
 import java.io.File
 
 /**
@@ -24,10 +25,13 @@ object Gallery {
      */
     fun photosOf(serialNo: String): List<File> {
         val r = root()
-        if (!r.exists() || serialNo.isBlank()) return emptyList()
+        if (!r.exists()) return emptyList()
+        // 空序列号落在「未命名」目录里，跟归档区和 FileNaming 保持一致。
+        // 以前这里直接返回空，导致这类项目导出时一张水印图都找不到
+        val folder = serialNo.ifBlank { FileNaming.UNNAMED }
         return r.listFiles { f -> f.isDirectory }
             ?.flatMap { day ->
-                File(day, serialNo).takeIf { it.isDirectory }
+                File(day, folder).takeIf { it.isDirectory }
                     ?.listFiles { f -> f.extension.equals("jpg", true) }?.toList() ?: emptyList()
             }
             ?.sortedBy { it.name } ?: emptyList()

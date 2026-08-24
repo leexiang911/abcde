@@ -1,5 +1,6 @@
 package com.sopcam.archive
 
+import com.sopcam.sop.FileNaming
 import com.sopcam.sop.SopTemplate
 import java.io.File
 import java.text.SimpleDateFormat
@@ -182,7 +183,7 @@ object Report {
      * 硬限制，选中再多张也没用。文件管理器没这个问题。
      */
     fun folderOf(order: Int, name: String): String {
-        val clean = name.replace(illegalInName, "").trim().take(40).ifBlank { "未命名" }
+        val clean = name.replace(illegalInName, "").trim().take(40).ifBlank { FileNaming.UNNAMED }
         return if (order > 0) "%02d_%s".format(order, clean) else "00_$clean"
     }
 

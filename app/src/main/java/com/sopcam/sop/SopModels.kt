@@ -262,6 +262,10 @@ object SopParser {
 
 object FileNaming {
 
+    /** 序列号为空时的目录名。跟归档区必须一致，否则两边找不到同一批照片 */
+    const val UNNAMED = "未命名"
+
+
     private val timeFmt = SimpleDateFormat("HHmmss", Locale.US)
     private val dayFmt = SimpleDateFormat("yyyyMMdd", Locale.US)
     private val illegal = Regex("""[\\/:*?"<>|\r\n\t]""")
@@ -272,7 +276,7 @@ object FileNaming {
         s = s.replace(Regex("""\s+"""), "_")
         s = s.trimEnd('.', '_')
         if (s.length > maxLen) s = s.take(maxLen).trimEnd('_')
-        return s.ifBlank { "未命名" }
+        return s.ifBlank { UNNAMED }
     }
 
     /**
@@ -302,8 +306,13 @@ object FileNaming {
      * 序列号为空时退到按日期存，不至于丢照片。
      */
     fun relativePath(serialNo: String, at: Long = System.currentTimeMillis()): String {
-        val folder = if (serialNo.isBlank()) "" else sanitize(serialNo, 32)
+        // 空序列号也建子目录。
+        //
+        // 以前是直接扔在日期目录下不建子目录，而归档区那边把它归到「未命名」，
+        // 结果同一批照片在两处的落脚点不一样 —— 恢复能写进相册，
+        // 导出却按序列号去找，找不到，表现成"恢复成功但导出没有水印图"。
+        val folder = sanitize(serialNo, 32).ifBlank { UNNAMED }
         val day = dayFmt.format(Date(at))
-        return if (folder.isBlank()) "DCIM/SopCam/$day" else "DCIM/SopCam/$day/$folder"
+        return "DCIM/SopCam/$day/$folder"
     }
 }

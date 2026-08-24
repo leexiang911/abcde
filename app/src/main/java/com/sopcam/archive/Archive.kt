@@ -8,6 +8,7 @@ import android.media.MediaScannerConnection
 import android.os.Build
 import android.os.Environment
 import com.sopcam.meta.ImageMeta
+import com.sopcam.sop.FileNaming
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -38,7 +39,7 @@ object Archive {
 
     /** 序列号来自扫码，可能带奇怪字符，落成目录名前先清一遍 */
     private fun safe(raw: String): String =
-        raw.replace(illegal, "").trim().ifBlank { "未命名" }.take(48)
+        raw.replace(illegal, "").trim().ifBlank { FileNaming.UNNAMED }.take(48)
 
     fun root(): File =
         File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), ROOT)

@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import com.sopcam.meta.ImageMeta
 import com.sopcam.meta.MediaWriter
+import com.sopcam.sop.FileNaming
 import com.sopcam.watermark.Anchor
 import com.sopcam.watermark.WatermarkContent
 import com.sopcam.watermark.WatermarkRenderer
@@ -176,5 +177,5 @@ object Restorer {
     }
 
     private fun fallbackPath(serialNo: String, at: Long): String =
-        "DCIM/SopCam/${dayFmt.format(Date(at))}/" + serialNo.ifBlank { "未命名" } + "/"
+        FileNaming.relativePath(serialNo, at)
 }
