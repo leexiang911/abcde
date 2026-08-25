@@ -505,6 +505,29 @@ class MainActivity : ComponentActivity() {
                             openProject = p.copy(status = st)
                             projects = Archive.list()
                         },
+                        onRename = { newSn ->
+                            detailBusy = "搬家中…"
+                            lifecycleScope.launch(Dispatchers.IO) {
+                                val err = Archive.renameProject(this@MainActivity, p.serialNo, newSn)
+                                withContext(Dispatchers.Main) {
+                                    detailBusy = null
+                                    if (err != null) {
+                                        showNote(err)
+                                    } else {
+                                        projects = Archive.list()
+                                        openProject = projects.firstOrNull { it.serialNo == newSn }
+                                        openShots = readShots(newSn)
+                                        // 正在拍的就是这台的话，会话里的序列号也要跟上
+                                        if (serialNo == p.serialNo) {
+                                            serialNo = newSn
+                                            progressSerial = newSn
+                                            persist()
+                                        }
+                                        showNote("已改成 " + newSn)
+                                    }
+                                }
+                            }
+                        },
                         onSetNote = { note ->
                             Archive.setNote(p.serialNo, note)
                             projects = Archive.list()

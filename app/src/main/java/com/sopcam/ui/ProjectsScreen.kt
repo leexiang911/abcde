@@ -1,9 +1,11 @@
 package com.sopcam.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,6 +34,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -74,6 +77,9 @@ fun ProjectsScreen(
 
     // 搜索和状态筛选叠加。扫码搜索本质上就是把码填进搜索框，不用另做一套
     var settingsOpen by remember { mutableStateOf(false) }
+    // 对话框必须挂在最外层。塞进底部操作坞里的话，它会跟着坞一起被布局约束住 ——
+    // 表现出来就是对话框跑到屏幕顶上，还把状态栏盖了
+    var confirmWipe by remember { mutableStateOf(false) }
 
     val shown = remember(all, query, statusFilter) {
         val q = query.trim().lowercase()
@@ -229,6 +235,20 @@ fun ProjectsScreen(
             }
         }
 
+        if (confirmWipe) {
+            ConfirmTypedDialog(
+                title = "删除 ${selected.size} 个项目",
+                detail = "这些控制器的原图和水印照片会一起清空，之后再也重烧不出来。" +
+                    "只想清相册的话，用「删除水印图片」。",
+                actionLabel = "删除",
+                onCancel = { confirmWipe = false },
+                onConfirm = {
+                    confirmWipe = false
+                    onDelete(DeleteScope.BOTH)
+                }
+            )
+        }
+
         if (settingsOpen) {
             ExportSettingsSheet(
                 settings = exportSettings,
@@ -248,13 +268,15 @@ fun ProjectsScreen(
                     onTray = { tray = if (tray == it) "" else it },
                     onOpenSettings = { settingsOpen = true },
                     onExport = onExport,
-                    onDelete = onDelete
+                    onDelete = onDelete,
+                    onAskDelete = { confirmWipe = true }
                 )
             }
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ProjectRow(
     p: Archive.Project,
@@ -262,6 +284,7 @@ private fun ProjectRow(
     onCheck: () -> Unit,
     onOpen: () -> Unit,
 ) {
+    val ctx = LocalContext.current
     Row(
         Modifier
             .fillMaxWidth()
@@ -307,13 +330,18 @@ private fun ProjectRow(
         }
 
         Column(Modifier.weight(1f)) {
+            // 长按复制序列号 —— 短按是进详情，两者不冲突
             Text(
                 p.serialNo,
                 color = Color.White,
                 fontSize = 14.sp,
                 fontFamily = FontFamily.Monospace,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.combinedClickable(
+                    onClick = onOpen,
+                    onLongClick = { copyToClipboard(ctx, p.serialNo) }
+                )
             )
             Spacer(Modifier.height(5.dp))
             val tags = listOf(p.model, p.platform, p.fault).filter { it.isNotBlank() }
@@ -362,23 +390,8 @@ private fun ActionDock(
     onOpenSettings: () -> Unit,
     onExport: (Exporter.Options) -> Unit,
     onDelete: (DeleteScope) -> Unit,
+    onAskDelete: () -> Unit,
 ) {
-    var deleting by remember { mutableStateOf(false) }
-
-    if (deleting) {
-        ConfirmTypedDialog(
-            title = "删除 ${serials.size} 个项目",
-            detail = "这些控制器的原图和水印照片会一起清空，之后再也重烧不出来。" +
-                "只想清相册的话，用「删除水印图」。",
-            actionLabel = "删除",
-            onCancel = { deleting = false },
-            onConfirm = {
-                deleting = false
-                onDelete(DeleteScope.BOTH)
-            }
-        )
-    }
-
     Column(
         Modifier
             .fillMaxWidth()
@@ -397,7 +410,7 @@ private fun ActionDock(
 
         when (tray) {
             "export" -> ExportTray(serials, exportSettings, onOpenSettings, onExport)
-            "delete" -> DeleteTray(count, onDelete) { deleting = true }
+            "delete" -> DeleteTray(count, onDelete, onAskDelete)
             else -> Unit
         }
 

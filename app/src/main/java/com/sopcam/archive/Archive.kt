@@ -258,6 +258,54 @@ object Archive {
         projectDir(serialNo).deleteRecursively()
     }.getOrDefault(false)
 
+    /**
+     * 给项目改序列号。
+     *
+     * 序列号不只是个名字 —— 它是归档目录名、相册目录名、还写在每张照片的
+     * 元数据和随行 json 里。所以改名等于搬家，四处都要跟着动，
+     * 漏一处照片就跟项目失联了。
+     *
+     * 返回失败原因，成功返回 null。
+     */
+    fun renameProject(ctx: Context, from: String, to: String): String? {
+        val target = to.trim()
+        if (target.isBlank()) return "序列号不能为空"
+        if (target == from) return null
+        if (!canWrite()) return "缺少文件访问权限"
+
+        val src = projectDir(from)
+        val dst = projectDir(target)
+        if (!src.exists()) return "找不到原项目"
+        if (dst.exists()) return "已经有叫这个序列号的项目了"
+
+        // 先搬相册，再搬归档 —— 相册那步失败还能原样退回来，
+        // 归档先动的话 sidecar 就找不到源了
+        val moved = Gallery.moveTo(ctx, from, target)
+        if (!src.renameTo(dst)) {
+            // 归档没搬成，把相册搬回去，别留下半拉状态
+            if (moved) Gallery.moveTo(ctx, target, from)
+            return "归档目录搬不动"
+        }
+
+        // 每张照片的随行 json 里记着成片路径和序列号，一起改掉
+        shots(target).forEach { raw ->
+            patchSidecar(raw) {
+                put("serialNo", target)
+                val old = optString("relativePath")
+                if (old.isNotBlank()) put("relativePath", old.replace("/$from", "/$target"))
+            }
+        }
+
+        runCatching {
+            val f = File(dst, "project.json")
+            if (f.exists()) {
+                val o = JSONObject(f.readText()).put("serialNo", target)
+                f.writeText(o.toString())
+            }
+        }
+        return null
+    }
+
     /** 事后补扫出来的码值，写回随行 json。恢复水印时就能带上它 */
     fun updateSidecarCode(raw: File, value: String, format: String): Boolean {
         val f = File(raw.parentFile, raw.nameWithoutExtension + ".json")

@@ -67,4 +67,41 @@ object Gallery {
             }
         }
     }
+    /**
+     * 把某个序列号的成片整体搬到新序列号下。
+     *
+     * 相册按 日期/序列号 分目录，改名要把每个日期目录下的那一份都搬过去。
+     * 搬完通知媒体库重扫，否则相册里旧路径会留一堆点不开的灰缩略图。
+     */
+    fun moveTo(ctx: Context, from: String, to: String): Boolean {
+        val r = root()
+        if (!r.exists()) return false
+        val fromDir = from.ifBlank { FileNaming.UNNAMED }
+        val toDir = to.ifBlank { FileNaming.UNNAMED }
+        val touched = mutableListOf<String>()
+        var any = false
+
+        r.listFiles { f -> f.isDirectory }?.forEach { day ->
+            val src = File(day, fromDir)
+            if (!src.isDirectory) return@forEach
+            val dst = File(day, toDir).apply { if (!exists()) mkdirs() }
+            src.listFiles()?.forEach { f ->
+                val target = File(dst, f.name)
+                touched += f.absolutePath
+                if (f.renameTo(target)) {
+                    touched += target.absolutePath
+                    any = true
+                }
+            }
+            runCatching { if (src.listFiles().isNullOrEmpty()) src.delete() }
+        }
+
+        if (touched.isNotEmpty()) {
+            runCatching {
+                MediaScannerConnection.scanFile(ctx, touched.toTypedArray(), null, null)
+            }
+        }
+        return any
+    }
+
 }

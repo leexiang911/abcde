@@ -97,6 +97,7 @@ fun ProjectDetailScreen(
     busy: String?,
     onSetStatus: (Archive.Status) -> Unit,
     onSetNote: (String) -> Unit,
+    onRename: (String) -> Unit,
     note: String?,
     onRestoreOne: (ShotItem) -> Unit,
     onRestoreAll: () -> Unit,
@@ -114,6 +115,8 @@ fun ProjectDetailScreen(
     var picked by remember { mutableStateOf<Set<String>>(emptySet()) }
     var confirmBatchDelete by remember { mutableStateOf(false) }
     var pendingScope by remember { mutableStateOf<DeleteScope?>(null) }
+    var renaming by remember(project.serialNo) { mutableStateOf(false) }
+    val ctx = LocalContext.current
     var editingText by remember { mutableStateOf<ShotItem?>(null) }
     val selecting = picked.isNotEmpty()
 
@@ -137,14 +140,30 @@ fun ProjectDetailScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(Modifier.weight(1f).padding(end = 12.dp)) {
-                    Text(
-                        project.serialNo,
-                        color = Color.White,
-                        fontSize = 16.sp,
-                        fontFamily = FontFamily.Monospace,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            project.serialNo,
+                            color = Color.White,
+                            fontSize = 16.sp,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .weight(1f, fill = false)
+                                .clickable { copyToClipboard(ctx, project.serialNo) }
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "改",
+                            color = Amber,
+                            fontSize = 12.sp,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .border(1.dp, Amber, RoundedCornerShape(4.dp))
+                                .clickable { renaming = true }
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
+                    }
                     Spacer(Modifier.height(4.dp))
                     val tags = listOf(project.model, project.platform, project.fault)
                         .filter { it.isNotBlank() }
@@ -298,6 +317,17 @@ fun ProjectDetailScreen(
                     onClose = { viewingAt = null }
                 )
             }
+        }
+
+        if (renaming) {
+            RenameDialog(
+                current = project.serialNo,
+                onCancel = { renaming = false },
+                onSave = {
+                    renaming = false
+                    onRename(it)
+                }
+            )
         }
 
         pendingScope?.let { scope ->
@@ -909,6 +939,96 @@ private fun NoteBox(note: String, onSave: (String) -> Unit) {
                     }
                     .padding(vertical = 11.dp)
             )
+        }
+    }
+}
+
+/**
+ * 改序列号。
+ *
+ * 序列号是目录名，改它等于搬家：归档目录、相册目录、每张照片随行 json 里的
+ * 路径和序列号都要跟着动。这些 Archive.renameProject 里已经处理了，
+ * 界面只负责把新名字要过来。
+ */
+@Composable
+private fun RenameDialog(
+    current: String,
+    onCancel: () -> Unit,
+    onSave: (String) -> Unit,
+) {
+    var text by remember { mutableStateOf(current) }
+    val changed = text.trim().isNotBlank() && text.trim() != current
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color(0xF0000000))
+            .clickable(onClick = onCancel),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            Modifier
+                .padding(22.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Panel)
+                .clickable(enabled = false) {}
+                .padding(20.dp)
+        ) {
+            Text("改序列号", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "扫错码了就在这儿改。归档目录、相册目录和每张照片的记录会一起搬过去。",
+                color = Steel, fontSize = 12.sp, lineHeight = 18.sp
+            )
+
+            Spacer(Modifier.height(16.dp))
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Ink)
+                    .padding(horizontal = 12.dp, vertical = 13.dp)
+            ) {
+                BasicTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    singleLine = true,
+                    textStyle = TextStyle(
+                        color = Color.White, fontSize = 15.sp, fontFamily = FontFamily.Monospace
+                    ),
+                    cursorBrush = SolidColor(Amber),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            Spacer(Modifier.height(18.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "保存",
+                    color = if (changed) Ink else Color(0xFF4A525C),
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (changed) Amber else Color(0xFF262D35))
+                        .clickable(enabled = changed) { onSave(text.trim()) }
+                        .padding(vertical = 13.dp)
+                )
+                Text(
+                    "取消",
+                    color = Steel,
+                    fontSize = 15.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .border(1.dp, Color(0xFF2A3037), RoundedCornerShape(8.dp))
+                        .clickable(onClick = onCancel)
+                        .padding(vertical = 13.dp)
+                )
+            }
         }
     }
 }
