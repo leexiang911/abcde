@@ -29,6 +29,18 @@ data class SopStep(
     val shots: Int = 1,
     /** 测点名，例如 "上桥U"。同一检查项下的每个测点各占一个步骤 */
     val point: String = "",
+    /**
+     * 要不要扫码，扫哪种。
+     * none / qr / datamatrix / barcode / any
+     */
+    val scan: String = "none",
+    /**
+     * 给 AI 的读数指令。提示词由配置的人写，App 只负责把返回值接住。
+     * 留空就不跑 AI。
+     */
+    val prompt: String = "",
+    /** 引用提示库里的 id，拍照时能点开看点位图 */
+    val hint: String = "",
     /** 报表归到哪一行。留空则这一步自成一行 */
     val group: String = "",
     val unit: String = "",
@@ -44,12 +56,18 @@ data class SopStep(
     /** 报表上归哪一行 */
     fun rowName(): String = group.ifBlank { name }
 
+    val needsScan: Boolean get() = scan != "none" && scan.isNotBlank()
+    val needsAi: Boolean get() = prompt.isNotBlank()
+
     fun toJson(): JSONObject = JSONObject()
         .put("order", order)
         .put("name", name)
         .put("refDes", refDes)
         .put("shots", shots)
         .put("point", point)
+        .put("scan", scan)
+        .put("prompt", prompt)
+        .put("hint", hint)
         .put("group", group)
         .put("unit", unit)
         .apply {
@@ -64,6 +82,9 @@ data class SopStep(
             refDes = o.optString("refDes"),
             shots = o.optInt("shots", 1),
             point = o.optString("point"),
+            scan = o.optString("scan", "none").ifBlank { "none" },
+            prompt = o.optString("prompt"),
+            hint = o.optString("hint"),
             group = o.optString("group"),
             unit = o.optString("unit"),
             rule = Rule.from(o.optJSONObject("rule")),
@@ -77,18 +98,36 @@ data class SopGroup(
     val name: String,
     val rule: Rule? = null,
     val unit: String = "",
+    /** 组 id。分组的 AI 结论按它存，也按它被别处引用 */
+    val id: String = "",
+    /** 哪几个测试项归到这一组：决定分到哪个文件夹、报表占哪一行 */
+    val members: List<String> = emptyList(),
+    /**
+     * 问 AI 的提示词，里面可以用 ${'$'}{测试项ID.ai} 这样的占位符取值。
+     * 取值不受分组边界限制 —— 想引用别的组里的照片也行。
+     */
+    val prompt: String = "",
 ) {
     fun toJson(): JSONObject = JSONObject()
+        .put("id", id)
         .put("name", name)
         .put("unit", unit)
+        .put("prompt", prompt)
+        .put("members", JSONArray(members))
         .apply { rule?.let { put("rule", it.toJson()) } }
 
     companion object {
-        fun from(o: JSONObject) = SopGroup(
-            name = o.optString("name"),
-            rule = Rule.from(o.optJSONObject("rule")),
-            unit = o.optString("unit"),
-        )
+        fun from(o: JSONObject): SopGroup {
+            val m = o.optJSONArray("members") ?: JSONArray()
+            return SopGroup(
+                id = o.optString("id"),
+                name = o.optString("name"),
+                rule = Rule.from(o.optJSONObject("rule")),
+                unit = o.optString("unit"),
+                prompt = o.optString("prompt"),
+                members = (0 until m.length()).map { m.optString(it) }.filter { it.isNotBlank() },
+            )
+        }
     }
 }
 
@@ -98,7 +137,8 @@ data class SopTemplate(
     val steps: List<SopStep>,
     val groups: List<SopGroup> = emptyList(),
 ) {
-    fun groupOf(name: String): SopGroup? = groups.firstOrNull { it.name == name }
+    fun groupOf(key: String): SopGroup? =
+        groups.firstOrNull { it.id == key } ?: groups.firstOrNull { it.name == key }
 
     /**
      * 按这台机器的型号 / 平台 / 故障筛出真正要做的步骤。

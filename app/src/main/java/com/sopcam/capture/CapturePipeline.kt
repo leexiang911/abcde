@@ -55,6 +55,11 @@ data class PendingShot(
     val keepOriginal: Boolean,
     val headline: String? = null,
     val lines: List<String> = emptyList(),
+    /**
+     * 这一项要不要扫码、扫哪种。来自流程配置里的 scan 字段。
+     * none 表示这张不用扫 —— 拿它去跑一遍纯属浪费。
+     */
+    val scanKind: String = "any",
     val style: WatermarkStyle = WatermarkStyle(),
 )
 
@@ -103,8 +108,11 @@ class CapturePipeline(
         // 预览那路只有 1600x1200，板子上的 Data Matrix 模块细，经常扫不出；
         // 这张是 4000x3000，多六倍像素，成功率高得多。
         // 预览已经扫到的话就不重复跑 —— 那说明码足够清楚。
-        val meta = if (shot.meta.codeValue.isNotBlank()) shot.meta else {
-            Codes.scan(bmp)?.let { shot.meta.copy(codeValue = it.value, codeFormat = it.format) }
+        val meta = when {
+            shot.scanKind == "none" -> shot.meta
+            shot.meta.codeValue.isNotBlank() -> shot.meta
+            else -> Codes.scan(bmp, kind = shot.scanKind)
+                ?.let { shot.meta.copy(codeValue = it.value, codeFormat = it.format) }
                 ?: shot.meta
         }
 

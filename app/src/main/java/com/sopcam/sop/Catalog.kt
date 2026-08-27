@@ -155,6 +155,8 @@ data class AppSettings(
     val shutterVibrate: Boolean = true,
     /** 快门提示音。车间有噪音可能听不见，但戴手套时震动也不明显，两个都留 */
     val shutterSound: Boolean = true,
+    /** 配置源地址，指向 index.json */
+    val configUrl: String = "",
     /**
      * 拍完停一下，确认这张要不要留、顺手写句备注。
      *
@@ -176,6 +178,7 @@ data class AppSettings(
         .put("scanInViewfinder", scanInViewfinder)
         .put("shutterVibrate", shutterVibrate)
         .put("shutterSound", shutterSound)
+        .put("configUrl", configUrl)
         .put("confirmEachShot", confirmEachShot)
 
     companion object {
@@ -191,6 +194,7 @@ data class AppSettings(
                 scanInViewfinder = o.optBoolean("scanInViewfinder", true),
                 shutterVibrate = o.optBoolean("shutterVibrate", true),
                 shutterSound = o.optBoolean("shutterSound", true),
+            configUrl = o.optString("configUrl"),
             confirmEachShot = o.optBoolean("confirmEachShot", false),
             )
         }

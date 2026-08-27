@@ -13,6 +13,7 @@ import androidx.camera.core.ImageProxy
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
+import com.google.mlkit.vision.barcode.BarcodeScanner
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
@@ -138,7 +139,45 @@ object Codes {
         )
         .build()
 
+    /**
+     * 按测试项配置的类型限定格式。
+     *
+     * 限定不只是为了快 —— 只认一种格式时，解码器不用挨个假设，
+     * 对模糊或反色的码识别率明显更高。
+     */
+    fun optionsFor(kind: String): BarcodeScannerOptions = when (kind) {
+        "qr" -> single(Barcode.FORMAT_QR_CODE)
+        "datamatrix" -> single(Barcode.FORMAT_DATA_MATRIX)
+        "barcode" -> BarcodeScannerOptions.Builder()
+            .setBarcodeFormats(
+                Barcode.FORMAT_CODE_128,
+                Barcode.FORMAT_CODE_39,
+                Barcode.FORMAT_CODE_93,
+                Barcode.FORMAT_EAN_13,
+                Barcode.FORMAT_EAN_8,
+                Barcode.FORMAT_ITF,
+                Barcode.FORMAT_CODABAR,
+            )
+            .build()
+        else -> options()
+    }
+
+    private fun single(fmt: Int) =
+        BarcodeScannerOptions.Builder().setBarcodeFormats(fmt).build()
+
     private val still by lazy { BarcodeScanning.getClient(options()) }
+    private val byKind = HashMap<String, BarcodeScanner>()
+
+    /**
+     * 按测试项配的类型取识别器。
+     *
+     * 限定格式不只是为了快 —— 只认一种时解码器不用挨个假设，
+     * 对模糊或反色的码识别率明显更高。
+     */
+    @Synchronized
+    private fun scannerFor(kind: String) =
+        if (kind.isBlank() || kind == "any" || kind == "none") still
+        else byKind.getOrPut(kind) { BarcodeScanning.getClient(optionsFor(kind)) }
 
     /**
      * 对一张已解码的位图扫码。
@@ -160,8 +199,12 @@ object Codes {
      * thorough=false 用在拍照流水线：只跑前两趟，不拖慢连拍。
      * thorough=true 用在手动和批量扫描：跑全套，慢几秒无所谓。
      */
-    suspend fun scan(bmp: Bitmap, thorough: Boolean = false): ScannedCode? {
-        mlkit(bmp)?.let { return it }
+    suspend fun scan(
+        bmp: Bitmap,
+        thorough: Boolean = false,
+        kind: String = "any",
+    ): ScannedCode? {
+        mlkit(bmp, kind)?.let { return it }
 
         // 预处理都在缩过的图上做，控制内存和耗时。
         // 2400 长边下模块还有约 13px，够解码，不必守着 4000
@@ -186,7 +229,7 @@ object Codes {
         try {
             for (make in makers) {
                 val v = withContext(Dispatchers.Default) { make() } ?: continue
-                val hit = mlkit(v) ?: if (thorough) {
+                val hit = mlkit(v, kind) ?: if (thorough) {
                     withContext(Dispatchers.Default) { ZxingDecoder.scan(v) }
                 } else null
                 v.recycle()
@@ -205,12 +248,13 @@ object Codes {
         return out
     }
 
-    private suspend fun mlkit(bmp: Bitmap): ScannedCode? = suspendCancellableCoroutine { cont ->
+    private suspend fun mlkit(bmp: Bitmap, kind: String = "any"): ScannedCode? =
+        suspendCancellableCoroutine { cont ->
         fun finish(v: ScannedCode?) {
             if (cont.isActive) cont.resume(v)
         }
         runCatching {
-            still.process(InputImage.fromBitmap(bmp, 0))
+            scannerFor(kind).process(InputImage.fromBitmap(bmp, 0))
                 .addOnSuccessListener { list ->
                     val hit = list.firstOrNull { !it.rawValue.isNullOrBlank() }
                     finish(hit?.let {

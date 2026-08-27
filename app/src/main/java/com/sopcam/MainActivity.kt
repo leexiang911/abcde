@@ -53,10 +53,12 @@ import com.sopcam.meta.ImageMeta
 import com.sopcam.meta.PendingCleaner
 import com.sopcam.sop.AppSettings
 import com.sopcam.sop.Catalog
+import com.sopcam.sop.ConfigSync
 import com.sopcam.sop.ControllerModel
 import com.sopcam.sop.FaultType
 import com.sopcam.sop.Faults
 import com.sopcam.sop.FileNaming
+import com.sopcam.sop.Hint
 import com.sopcam.sop.Session
 import com.sopcam.sop.SettingsStore
 import com.sopcam.sop.SopStep
@@ -156,6 +158,9 @@ class MainActivity : ComponentActivity() {
     private var picked by mutableStateOf<Set<String>>(emptySet())
     private var exporting by mutableStateOf<String?>(null)
     private var exportSettings by mutableStateOf(ExportSettings())
+    private var syncState by mutableStateOf("")
+    private var syncing by mutableStateOf(false)
+    private var hints by mutableStateOf<List<Hint>>(emptyList())
     private var openProject by mutableStateOf<Archive.Project?>(null)
     private var openShots by mutableStateOf<List<ShotItem>>(emptyList())
     // 重拍：目标是哪一张、新拍的那张落在哪、新成片叫什么
@@ -231,6 +236,12 @@ class MainActivity : ComponentActivity() {
         faults = Faults.load(this)
         settings = SettingsStore.load(this)
         exportSettings = ExportStore.load(this)
+        // 下载来的流程跟本地手建的合在一起用，本地的排后面
+        templates.addAll(0, ConfigSync.templates(this))
+        hints = ConfigSync.hints(this)
+        ConfigSync.state(this)?.let {
+            syncState = "配置版本 ${it.version} · ${it.templates} 份流程"
+        }
 
         // 上次落盘被打断留下的待定条目：文件占着空间，相册里看不见。
         // 不主动清的话只会越攒越多
@@ -648,6 +659,9 @@ class MainActivity : ComponentActivity() {
                     archiveReady = archiveReady,
                     onGrantArchive = ::openArchivePermission,
                     onAiLab = { screen = Screen.AI_LAB },
+                    syncState = syncState,
+                    syncing = syncing,
+                    onSync = ::syncConfig,
                     onChange = {
                         settings = it
                         SettingsStore.save(this, it)
@@ -979,6 +993,39 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * 拉配置。
+     *
+     * 下载来的流程整批替换，本地手建的保留 —— 用来源区分，
+     * 免得同步一次把你临时建的测试流程冲掉。
+     */
+    private fun syncConfig(url: String, force: Boolean) {
+        syncing = true
+        syncState = "连接中…"
+        lifecycleScope.launch(Dispatchers.IO) {
+            val r = ConfigSync.sync(this@MainActivity, url, force)
+            withContext(Dispatchers.Main) {
+                syncing = false
+                syncState = buildString {
+                    append(r.message)
+                    if (r.ok && r.templates > 0) append(" · ${r.templates} 份流程")
+                    if (r.ok && r.images > 0) append(" · ${r.images} 张提示图")
+                }
+                if (r.ok) {
+                    val remote = ConfigSync.templates(this@MainActivity)
+                    val remoteIds = remote.map { it.id }.toSet()
+                    val local = SopStore.loadTemplates(this@MainActivity)
+                        .filter { it.id !in remoteIds }
+                    templates.clear()
+                    templates.addAll(remote + local)
+                    hints = ConfigSync.hints(this@MainActivity)
+                    catalog = Catalog.load(this@MainActivity)
+                    faults = Faults.load(this@MainActivity)
+                }
+            }
+        }
+    }
+
     private fun openArchivePermission() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
         runCatching {
@@ -1235,6 +1282,7 @@ class MainActivity : ComponentActivity() {
                 keepOriginal = shotKeepRaw,
                 headline = shotContent.headline,
                 lines = shotContent.lines,
+                scanKind = step?.scan ?: "any",
             )
         }
 

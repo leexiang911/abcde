@@ -16,14 +16,22 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sopcam.sop.AppSettings
@@ -34,6 +42,9 @@ fun SettingsScreen(
     archiveReady: Boolean,
     onGrantArchive: () -> Unit,
     onAiLab: () -> Unit,
+    syncState: String,
+    syncing: Boolean,
+    onSync: (String, Boolean) -> Unit,
     onChange: (AppSettings) -> Unit,
     onBack: () -> Unit,
 ) {
@@ -123,6 +134,78 @@ fun SettingsScreen(
             desc = "存到 Documents/SOP归档，不进相册。水印照片删了能从这里恢复，代价是占用翻倍。",
             checked = settings.keepOriginal,
         ) { onChange(settings.copy(keepOriginal = it)) }
+
+        Spacer(Modifier.height(28.dp))
+        SectionTitle("流程配置")
+
+        var url by remember(settings.configUrl) { mutableStateOf(settings.configUrl) }
+
+        Text(
+            "填 index.json 的地址。流程、型号目录、故障类型和提示图都从那儿下载，" +
+                "所有人用同一份标准。",
+            color = Steel, fontSize = 12.sp, lineHeight = 18.sp
+        )
+        Spacer(Modifier.height(8.dp))
+
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(Panel)
+                .padding(horizontal = 12.dp, vertical = 13.dp)
+        ) {
+            if (url.isEmpty()) {
+                Text(
+                    "https://raw.githubusercontent.com/…/index.json",
+                    color = Color(0xFF4A525C), fontSize = 12.sp, maxLines = 1
+                )
+            }
+            BasicTextField(
+                value = url,
+                onValueChange = {
+                    url = it
+                    onChange(settings.copy(configUrl = it.trim()))
+                },
+                singleLine = true,
+                textStyle = TextStyle(color = Color.White, fontSize = 12.sp),
+                cursorBrush = SolidColor(Amber),
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                if (syncing) "同步中…" else "检查更新",
+                color = if (syncing) Steel else Ink,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (syncing) Color(0xFF262D35) else Amber)
+                    .clickable(enabled = !syncing && url.isNotBlank()) { onSync(url.trim(), false) }
+                    .padding(vertical = 13.dp)
+            )
+            Text(
+                "强制重下",
+                color = Steel,
+                fontSize = 14.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .border(1.dp, Color(0xFF2A3037), RoundedCornerShape(8.dp))
+                    .clickable(enabled = !syncing && url.isNotBlank()) { onSync(url.trim(), true) }
+                    .padding(vertical = 13.dp)
+            )
+        }
+
+        if (syncState.isNotBlank()) {
+            Spacer(Modifier.height(8.dp))
+            Text(syncState, color = Done, fontSize = 12.sp, lineHeight = 18.sp)
+        }
 
         Spacer(Modifier.height(28.dp))
         SectionTitle("实验")
