@@ -147,6 +147,18 @@ object ConfigSync {
         return if (f.exists() && f.length() > 0) f else null
     }
 
+    /**
+     * 按提示项里写的 image 取本地缓存文件。
+     *
+     * 缓存文件名是 hash(完整地址)，而 HintItem.image 存的是配置里的原样写法（一般是相对路径）。
+     * 两边不走同一条 resolve 就永远对不上 —— 图明明下下来了，界面却当成没缓存。
+     */
+    fun hintImage(ctx: Context, image: String): File? {
+        if (image.isBlank()) return null
+        val base = state(ctx)?.url?.substringBeforeLast('/', "") ?: ""
+        return localImage(ctx, resolve(base, image))
+    }
+
     private fun cacheHintImages(ctx: Context, arr: JSONArray, base: String): Int {
         var n = 0
         for (i in 0 until arr.length()) {

@@ -687,6 +687,7 @@ class MainActivity : ComponentActivity() {
                     steps = activeSteps,
                     currentIndex = stepIndex,
                     shotCounts = shotCounts,
+                    hints = hints,
                     anchor = anchor,
                     watermarkVisible = settings.watermarkVisible,
                     edge = topEdge,

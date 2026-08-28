@@ -111,7 +111,7 @@ class CapturePipeline(
         val meta = when {
             shot.scanKind == "none" -> shot.meta
             shot.meta.codeValue.isNotBlank() -> shot.meta
-            else -> Codes.scan(bmp, kind = shot.scanKind)
+            else -> Codes.scan(bmp, thorough = true, kind = shot.scanKind)
                 ?.let { shot.meta.copy(codeValue = it.value, codeFormat = it.format) }
                 ?: shot.meta
         }

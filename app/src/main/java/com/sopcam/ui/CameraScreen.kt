@@ -1,5 +1,6 @@
 package com.sopcam.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -44,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.abs
 import androidx.compose.ui.viewinterop.AndroidView
+import com.sopcam.sop.Hint
 import com.sopcam.sop.SopStep
 import com.sopcam.watermark.Anchor
 import com.sopcam.watermark.TopEdge
@@ -65,6 +67,7 @@ fun CameraScreen(
     steps: List<SopStep>,
     currentIndex: Int,
     shotCounts: Map<Int, Int>,
+    hints: List<Hint>,
     anchor: Anchor,
     watermarkVisible: Boolean,
     edge: TopEdge,
@@ -110,6 +113,14 @@ fun CameraScreen(
     // 点在对焦框范围内算取消，点别处算重新对焦
     val reticleHalfPx = with(LocalDensity.current) { 42.dp.toPx() }
 
+    // 步骤里的 hint 是提示库的 id，查得到才给入口 —— 查不到就当没有，别弹一页空白
+    var openHint by remember { mutableStateOf<Hint?>(null) }
+    val hintOf: (SopStep) -> Hint? = { s ->
+        if (s.hint.isBlank()) null else hints.firstOrNull { it.id == s.hint }
+    }
+    // 提示开着的时候返回键先关提示，别一路退出相机
+    BackHandler(enabled = openHint != null) { openHint = null }
+
     Box(Modifier.fillMaxSize().background(Ink)) {
 
         Column(Modifier.fillMaxSize()) {
@@ -135,7 +146,7 @@ fun CameraScreen(
 
             if (steps.isNotEmpty()) {
                 Spacer(Modifier.height(10.dp))
-                StepLadder(steps, currentIndex, shotCounts, onStepSelect)
+                StepLadder(steps, currentIndex, shotCounts, hintOf, { openHint = it }, onStepSelect)
             }
 
             Spacer(Modifier.height(10.dp))
@@ -314,6 +325,9 @@ fun CameraScreen(
                 }
             }
         }
+
+        // 提示弹层挂在最外层 Box —— 塞进 StepLadder 的 LazyRow item 里会被列表布局约束住
+        openHint?.let { HintSheet(it) { openHint = null } }
     }
 }
 
@@ -322,6 +336,8 @@ private fun StepLadder(
     steps: List<SopStep>,
     currentIndex: Int,
     shotCounts: Map<Int, Int>,
+    hintOf: (SopStep) -> Hint?,
+    onHintTap: (Hint) -> Unit,
     onSelect: (Int) -> Unit,
 ) {
     val listState = rememberLazyListState()
@@ -355,12 +371,33 @@ private fun StepLadder(
                     .padding(horizontal = 10.dp, vertical = 7.dp),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
                         step.order.toString().padStart(2, '0'),
                         color = tint, fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold
                     )
+                    // 入口只长在当前步骤上：非激活卡片只有 116dp，塞进去会挤掉步骤名。
+                    // 不加纵向 padding，行高就不会被撑开，卡片还是 62dp 装得下两行标题
+                    val h = if (active) hintOf(step) else null
+                    if (h != null) {
+                        Box(
+                            Modifier
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(Amber)
+                                .clickable { onHintTap(h) }
+                                .padding(horizontal = 6.dp)
+                        ) {
+                            Text(
+                                "图示", color = Ink, fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                     Text(
                         "$taken/${step.shots}",
                         color = tint, fontSize = 10.sp, fontFamily = FontFamily.Monospace
