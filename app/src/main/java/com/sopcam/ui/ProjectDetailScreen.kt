@@ -408,7 +408,6 @@ fun ProjectDetailScreen(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 /**
  * AI 读数那一条。
  *
@@ -489,6 +488,7 @@ private fun AiBar(
     Spacer(Modifier.height(12.dp))
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ThumbCell(
     item: ShotItem,
