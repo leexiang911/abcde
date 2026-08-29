@@ -91,6 +91,9 @@ object Report {
                         .put("at", side.optLong("capturedAt", raw.lastModified()))
                         .put("time", shotFmt.format(Date(side.optLong("capturedAt", raw.lastModified()))))
                         .put("code", side.optString("codeValue"))
+                        // 拍照时打的备注。跟着这张图走，不并到组上 ——
+                        // 一组里几张图各说各的事，合在一起就分不清哪句对应哪张
+                        .put("note", side.optString("note"))
                 )
 
                 // 每个测点一个格子。同一测点拍多张，格子还是一个
@@ -339,11 +342,22 @@ button.go{background:var(--mark);border-color:var(--mark);font-weight:600}
 
 .shots{user-select:none;-webkit-user-select:none}
 figure{margin:0;width:172px}
+/* 图和它的备注绑成一格，备注绝对定位就有参照物了 */
+.thumb{position:relative;width:172px;line-height:0}
 figure img{width:172px;height:129px;object-fit:cover;border:1px solid var(--rule);
   background:#fff;cursor:zoom-in;display:block}
 figure img:hover{border-color:var(--ink)}
 figcaption{font-family:var(--mono);font-size:10.5px;color:var(--mute);
   margin-top:4px;text-align:center}
+/* 单张图的备注：压在缩略图下沿，跟图绑死 —— 一屏几十张图，
+   备注挨着图放都可能看串行，盖在图上就不会认错是哪张。
+   最多三行，长备注在这儿截断；完整内容点开大图看，那边能一键复制。
+   pointer-events:none 是为了点到备注上也照样开大图，别在小图上做两种点击 */
+.shotnote{position:absolute;left:1px;right:1px;bottom:1px;
+  font-size:11px;line-height:1.35;color:#fff;text-align:left;
+  padding:4px 6px;background:rgba(14,16,18,.82);
+  white-space:pre-wrap;word-break:break-word;pointer-events:none;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .code{display:inline-block;margin-top:8px;font-family:var(--mono);font-size:12px;
   padding:3px 8px;background:#fff;border:1px solid var(--rule);cursor:copy}
 .code:hover{border-color:var(--ink)}
@@ -388,6 +402,13 @@ input[type=text]:focus{outline:2px solid var(--mark);outline-offset:-1px;border-
 #box img{max-width:94vw;max-height:88vh;object-fit:contain}
 #box .cap{position:absolute;bottom:22px;left:0;right:0;text-align:center;
   color:#C9CDD2;font-family:var(--mono);font-size:12px}
+/* 有备注时换个样子：白底药丸，一看就知道能点。cursor 要盖掉 #box 的 zoom-out */
+#box .cap.has{max-width:80vw;margin:0 auto;padding:9px 16px;
+  background:#fff;color:var(--ink);font-family:var(--sans);font-size:13px;
+  line-height:1.6;white-space:pre-wrap;word-break:break-word;text-align:left;
+  cursor:copy;display:inline-block;position:absolute;left:50%;
+  transform:translateX(-50%);right:auto;
+  user-select:text;-webkit-user-select:text}
 
 footer{margin-top:40px;color:var(--mute);font-size:12px;line-height:1.9}
 footer b{color:var(--ink)}
@@ -513,7 +534,11 @@ function render(){
       html += '<div class="shots">';
       s.shots.forEach(function(sh){
         html += '<figure>';
-        html += '<img src="' + esc(sh.file) + '" alt="' + esc(s.name) + '" data-full="' + esc(sh.file) + '">';
+        html += '<div class="thumb">';
+        html += '<img src="' + esc(sh.file) + '" alt="' + esc(s.name) + '" data-full="' + esc(sh.file) + '"' +
+                ' data-note="' + esc(sh.note || "") + '">';
+        if (sh.note) html += '<div class="shotnote">' + esc(sh.note) + '</div>';
+        html += '</div>';
         html += '<figcaption>' + esc(sh.time) + '</figcaption>';
         html += '</figure>';
       });
@@ -759,7 +784,12 @@ function bindZoom(root){
     img._z = 1;
     img.addEventListener("click", function(){
       box.querySelector("img").src = img.getAttribute("data-full");
-      box.querySelector(".cap").textContent = "右键可以复制图片";
+      // 有备注就把备注顶上来，没有才退回那句操作提示
+      var n = img.getAttribute("data-note") || "";
+      var cap = box.querySelector(".cap");
+      cap.textContent = n || "右键可以复制图片";
+      cap.className = n ? "cap has" : "cap";
+      cap.setAttribute("data-copy", n);
       box.style.display = "flex";
     });
   });
@@ -845,6 +875,13 @@ function bind(){
 
   bindZoom(document);
   var box = document.getElementById("box");
+  // 点备注是复制，不是关灯箱 —— 得先把事件截住，否则冒泡上去图就关了
+  box.querySelector(".cap").addEventListener("click", function(e){
+    var t = this.getAttribute("data-copy");
+    if (!t) return;
+    e.stopPropagation();
+    copy(t);
+  });
   box.addEventListener("click", function(){ box.style.display = "none"; });
   document.addEventListener("keydown", function(e){
     if (e.key === "Escape") box.style.display = "none";
