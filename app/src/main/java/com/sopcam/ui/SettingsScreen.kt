@@ -261,6 +261,14 @@ fun SettingsScreen(
             checked = settings.scanInViewfinder,
         ) { onChange(settings.copy(scanInViewfinder = it)) }
 
+        SwitchRow(
+            title = "自由拍摄也扫码",
+            desc = "没走流程随手拍的照片也顺带扫一遍，只认二维码和条形码，" +
+                "不跑板子上那种点阵丝印码 —— 那套要多跑七八趟，随手拍的图多半没有码，白烧电。" +
+                "点阵丝印码请在项目详情里框选或批量扫码。走流程时这个开关不起作用，听测试项配置的。",
+            checked = settings.scanFreeShots,
+        ) { onChange(settings.copy(scanFreeShots = it)) }
+
         Spacer(Modifier.height(28.dp))
         SectionTitle("元数据")
 

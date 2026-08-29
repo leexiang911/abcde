@@ -164,6 +164,18 @@ data class AppSettings(
      * 等走到下一项再回头，就得退出相机翻项目了。
      */
     val confirmEachShot: Boolean = false,
+    /**
+     * 自由拍摄（没走流程、没有测试项）时也扫码。
+     *
+     * 只扫二维码和条形码这类清晰码，走快扫两趟，不跑点阵码那套八趟级联 ——
+     * 整板概览、焊点特写这些照片本来就没码，跑全套纯属白烧电。
+     * 板子上的点阵丝印码请在项目详情里框选或批量扫码，那边才走全套。
+     */
+    val scanFreeShots: Boolean = true,
+    /** AI 跑批用哪个模型。AI 实验室里加载成功后自动记住，后台跑批直接用 */
+    val aiModelPath: String = "",
+    /** CPU / GPU，跟 LiteRt.Device 的名字对应 */
+    val aiDevice: String = "GPU",
 ) {
     /** 两行都关等于没水印，那就别白跑一趟烧录 */
     val burnsAnything: Boolean
@@ -180,6 +192,9 @@ data class AppSettings(
         .put("shutterSound", shutterSound)
         .put("configUrl", configUrl)
         .put("confirmEachShot", confirmEachShot)
+        .put("scanFreeShots", scanFreeShots)
+        .put("aiModelPath", aiModelPath)
+        .put("aiDevice", aiDevice)
 
     companion object {
         fun from(o: JSONObject): AppSettings {
@@ -196,6 +211,9 @@ data class AppSettings(
                 shutterSound = o.optBoolean("shutterSound", true),
             configUrl = o.optString("configUrl"),
             confirmEachShot = o.optBoolean("confirmEachShot", false),
+            scanFreeShots = o.optBoolean("scanFreeShots", true),
+            aiModelPath = o.optString("aiModelPath"),
+            aiDevice = o.optString("aiDevice", "GPU").ifBlank { "GPU" },
             )
         }
     }

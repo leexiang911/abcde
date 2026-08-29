@@ -33,6 +33,18 @@ data class ImageMeta(
     val note: String = "",
     val codeValue: String = "",
     val codeFormat: String = "",
+    /**
+     * AI 读数三件套。
+     *
+     * prompt 必须跟着照片走，不能只留在流程配置里 —— 事后跑批时，
+     * 程序得知道该拿这张图问什么。配置改了或换了流程，老照片也还能按当时的问法重跑。
+     *
+     * state: 空 = 这张没有 AI 任务；pending = 排队中；ok = 已出值；
+     *        rejected = 人工否掉了，不再自动重跑（要重跑得手动点）
+     */
+    val aiPrompt: String = "",
+    val aiText: String = "",
+    val aiState: String = "",
     val anchor: String = "",
     val topEdge: String = "",
     val latitude: Double? = null,
@@ -71,10 +83,13 @@ object Xmp {
                 add("sopcam:StepOrder" to meta.stepOrder.toString())
                 add("sopcam:StepName" to meta.stepName)
                 if (meta.stepRefDes.isNotBlank()) add("sopcam:StepRefDes" to meta.stepRefDes)
-            if (meta.stepPoint.isNotBlank()) add("sopcam:StepPoint" to meta.stepPoint)
-            if (meta.stepGroup.isNotBlank()) add("sopcam:StepGroup" to meta.stepGroup)
-            if (meta.note.isNotBlank()) add("sopcam:Note" to meta.note)
+                if (meta.stepPoint.isNotBlank()) add("sopcam:StepPoint" to meta.stepPoint)
+                if (meta.stepGroup.isNotBlank()) add("sopcam:StepGroup" to meta.stepGroup)
             }
+            // 备注跟步骤无关，自由拍摄也该写进去 —— 原来误缩在 stepOrder>0 里面，
+            // 没走流程拍的照片，备注只进了随行 json，XMP 里是空的
+            if (meta.note.isNotBlank()) add("sopcam:Note" to meta.note)
+            if (meta.aiText.isNotBlank()) add("sopcam:AiText" to meta.aiText)
             if (meta.codeValue.isNotBlank()) {
                 add("sopcam:CodeValue" to meta.codeValue)
                 add("sopcam:CodeFormat" to meta.codeFormat)

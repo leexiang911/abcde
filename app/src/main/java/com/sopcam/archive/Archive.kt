@@ -113,6 +113,9 @@ object Archive {
                 .put("note", meta.note)
                 .put("codeValue", meta.codeValue)
                 .put("codeFormat", meta.codeFormat)
+                .put("aiPrompt", meta.aiPrompt)
+                .put("aiText", meta.aiText)
+                .put("aiState", meta.aiState)
                 .put("anchor", meta.anchor)
                 .put("topEdge", meta.topEdge)
                 .put("headline", headline ?: "")
@@ -419,6 +422,20 @@ object Archive {
         val f = File(raw.parentFile, raw.nameWithoutExtension + ".json")
         if (f.exists()) JSONObject(f.readText()) else null
     }.getOrNull()
+
+    /**
+     * 回写一张图的 AI 读数结果。
+     *
+     * 只动 aiText / aiState 两个键，其余原样保留 —— 随行 json 里还存着
+     * 重烧水印要用的全套信息，整份覆盖会把它们清掉。
+     */
+    fun setAiResult(raw: File, text: String, state: String): Boolean = runCatching {
+        val f = File(raw.parentFile, raw.nameWithoutExtension + ".json")
+        if (!f.exists()) return false
+        val o = JSONObject(f.readText())
+        f.writeText(o.put("aiText", text).put("aiState", state).toString())
+        true
+    }.getOrDefault(false)
 }
 
 /* ------------------------------------------------------------------

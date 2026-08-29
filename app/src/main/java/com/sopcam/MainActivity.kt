@@ -652,7 +652,15 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
-                Screen.AI_LAB -> AiLabScreen(onBack = { screen = Screen.SETTINGS })
+                Screen.AI_LAB -> AiLabScreen(
+                    savedModelPath = settings.aiModelPath,
+                    savedDevice = settings.aiDevice,
+                    onModelChosen = { path, dev ->
+                        settings = settings.copy(aiModelPath = path, aiDevice = dev)
+                        SettingsStore.save(this, settings)
+                    },
+                    onBack = { screen = Screen.SETTINGS }
+                )
 
                 Screen.SETTINGS -> SettingsScreen(
                     settings = settings,
@@ -1268,12 +1276,21 @@ class MainActivity : ComponentActivity() {
                 relativePath = shotPath,
                 content = shotContent,
                 anchor = shotAnchor,
-                meta = meta.copy(note = note),
+                // prompt 跟着照片走：事后跑批才知道该问这张图什么。
+                // 有 prompt 就排进 AI 队列，没有就留空表示这张没有 AI 任务
+                meta = meta.copy(
+                    note = note,
+                    aiPrompt = step?.prompt.orEmpty(),
+                    aiState = if (step?.prompt.isNullOrBlank()) "" else "pending",
+                ),
                 burnWatermark = shotBurn,
                 keepOriginal = shotKeepRaw,
                 headline = shotContent.headline,
                 lines = shotContent.lines,
-                scanKind = step?.scan ?: "any",
+                // 走流程时听配置的；自由拍摄看设置里的开关，开了只扫清晰的二维码条码
+                scanKind = step?.scan ?: if (settings.scanFreeShots) "common" else "none",
+                // 全套级联只留给配置里点名要扫的步骤
+                scanThorough = step != null && step.scan.isNotBlank() && step.scan != "none",
             )
         }
 

@@ -60,6 +60,14 @@ data class PendingShot(
      * none 表示这张不用扫 —— 拿它去跑一遍纯属浪费。
      */
     val scanKind: String = "any",
+    /**
+     * 走不走全套级联（膨胀 / 取反 / ZXing 兜底）。
+     *
+     * 只有流程里明确点名要扫码的步骤才给 true —— 那种图基本都有码，
+     * 多跑几趟是值得的。自由拍摄那路走 false 的两趟快扫：
+     * 没有码的图（整板概览、焊点特写）跑全套要把八趟全跑完才认输，纯烧电。
+     */
+    val scanThorough: Boolean = false,
     val style: WatermarkStyle = WatermarkStyle(),
 )
 
@@ -111,7 +119,7 @@ class CapturePipeline(
         val meta = when {
             shot.scanKind == "none" -> shot.meta
             shot.meta.codeValue.isNotBlank() -> shot.meta
-            else -> Codes.scan(bmp, thorough = true, kind = shot.scanKind)
+            else -> Codes.scan(bmp, thorough = shot.scanThorough, kind = shot.scanKind)
                 ?.let { shot.meta.copy(codeValue = it.value, codeFormat = it.format) }
                 ?: shot.meta
         }

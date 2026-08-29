@@ -147,6 +147,20 @@ object Codes {
      */
     fun optionsFor(kind: String): BarcodeScannerOptions = when (kind) {
         "qr" -> single(Barcode.FORMAT_QR_CODE)
+        // 自由拍摄用这一档：清晰的二维码和条形码都认，唯独不含 DATA_MATRIX。
+        // 点阵码要靠膨胀级联才解得出，放进随手拍的路径上只会每张白跑八趟
+        "common" -> BarcodeScannerOptions.Builder()
+            .setBarcodeFormats(
+                Barcode.FORMAT_QR_CODE,
+                Barcode.FORMAT_CODE_128,
+                Barcode.FORMAT_CODE_39,
+                Barcode.FORMAT_CODE_93,
+                Barcode.FORMAT_EAN_13,
+                Barcode.FORMAT_EAN_8,
+                Barcode.FORMAT_ITF,
+                Barcode.FORMAT_CODABAR,
+            )
+            .build()
         "datamatrix" -> single(Barcode.FORMAT_DATA_MATRIX)
         "barcode" -> BarcodeScannerOptions.Builder()
             .setBarcodeFormats(

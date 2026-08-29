@@ -60,13 +60,24 @@ import kotlinx.coroutines.withContext
  * 所以这里把耗时、后端、原始输出全都摊开显示，出了问题能一眼看出卡在哪。
  */
 @Composable
-fun AiLabScreen(onBack: () -> Unit) {
+fun AiLabScreen(
+    /** 上次记住的模型路径和后端，回到这一页时预选上 */
+    savedModelPath: String = "",
+    savedDevice: String = "GPU",
+    /** 加载成功就记下来 —— 后台跑批要用同一个模型，不能让它随实验室的局部状态消失 */
+    onModelChosen: (String, String) -> Unit = { _, _ -> },
+    onBack: () -> Unit,
+) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
 
     var models by remember { mutableStateOf<List<File>>(emptyList()) }
     var picked by remember { mutableStateOf<File?>(null) }
-    var device by remember { mutableStateOf(LiteRt.Device.GPU) }
+    var device by remember {
+        mutableStateOf(
+            LiteRt.Device.entries.firstOrNull { it.name == savedDevice } ?: LiteRt.Device.GPU
+        )
+    }
     var busy by remember { mutableStateOf<String?>(null) }
     var log by remember { mutableStateOf("") }
 
@@ -78,7 +89,8 @@ fun AiLabScreen(onBack: () -> Unit) {
 
     LaunchedEffect(Unit) {
         models = withContext(Dispatchers.IO) { LiteRt.findModels() }
-        picked = models.firstOrNull()
+        // 上次记住的那个优先预选，找不到再退回第一个
+        picked = models.firstOrNull { it.absolutePath == savedModelPath } ?: models.firstOrNull()
         shots = withContext(Dispatchers.IO) {
             Archive.list().take(4).flatMap { Archive.shots(it.serialNo).take(6) }
         }
@@ -215,7 +227,10 @@ fun AiLabScreen(onBack: () -> Unit) {
                         LiteRt.load(ctx, f.absolutePath, device)
                     }
                     busy = null
-                    r.onSuccess { append("✓ 加载成功 ${it.device.label} 用时 ${it.millis} ms") }
+                    r.onSuccess {
+                        onModelChosen(it.path, it.device.name)
+                        append("✓ 加载成功 ${it.device.label} 用时 ${it.millis} ms，已记为默认模型")
+                    }
                         .onFailure { append("✗ 加载失败 ${it.javaClass.simpleName}: ${it.message}") }
                 }
             }
