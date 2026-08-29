@@ -94,6 +94,9 @@ object Report {
                         // 拍照时打的备注。跟着这张图走，不并到组上 ——
                         // 一组里几张图各说各的事，合在一起就分不清哪句对应哪张
                         .put("note", side.optString("note"))
+                        // AI 读出来的值。跟备注一样绑在图上，不并到组上 ——
+                        // 一组拍好几张时，几个值合成一格就分不清是哪张读出来的
+                        .put("ai", side.optString("aiText"))
                 )
 
                 // 每个测点一个格子。同一测点拍多张，格子还是一个
@@ -353,6 +356,13 @@ figcaption{font-family:var(--mono);font-size:10.5px;color:var(--mute);
    备注挨着图放都可能看串行，盖在图上就不会认错是哪张。
    最多三行，长备注在这儿截断；完整内容点开大图看，那边能一键复制。
    pointer-events:none 是为了点到备注上也照样开大图，别在小图上做两种点击 */
+/* AI 读数：跟备注一样压在图上，但压在上沿、用蓝色，
+   一眼分得清哪句是人写的、哪句是机器读的 */
+.shotai{position:absolute;left:1px;right:1px;top:1px;
+  font-size:11px;line-height:1.35;color:#0B2434;text-align:left;
+  padding:4px 6px;background:rgba(123,198,255,.92);
+  white-space:pre-wrap;word-break:break-word;pointer-events:none;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .shotnote{position:absolute;left:1px;right:1px;bottom:1px;
   font-size:11px;line-height:1.35;color:#fff;text-align:left;
   padding:4px 6px;background:rgba(14,16,18,.82);
@@ -536,7 +546,9 @@ function render(){
         html += '<figure>';
         html += '<div class="thumb">';
         html += '<img src="' + esc(sh.file) + '" alt="' + esc(s.name) + '" data-full="' + esc(sh.file) + '"' +
-                ' data-note="' + esc(sh.note || "") + '">';
+                ' data-note="' + esc(sh.note || "") + '"' +
+                ' data-ai="' + esc(sh.ai || "") + '">';
+        if (sh.ai) html += '<div class="shotai">' + esc(sh.ai) + '</div>';
         if (sh.note) html += '<div class="shotnote">' + esc(sh.note) + '</div>';
         html += '</div>';
         html += '<figcaption>' + esc(sh.time) + '</figcaption>';
@@ -785,7 +797,9 @@ function bindZoom(root){
     img.addEventListener("click", function(){
       box.querySelector("img").src = img.getAttribute("data-full");
       // 有备注就把备注顶上来，没有才退回那句操作提示
-      var n = img.getAttribute("data-note") || "";
+      var a = img.getAttribute("data-ai") || "";
+      var n = [a ? "AI：" + a : "", img.getAttribute("data-note") || ""]
+              .filter(Boolean).join("\n");
       var cap = box.querySelector(".cap");
       cap.textContent = n || "右键可以复制图片";
       cap.className = n ? "cap has" : "cap";

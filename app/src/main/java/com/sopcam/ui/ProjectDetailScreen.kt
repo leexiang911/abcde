@@ -77,6 +77,10 @@ data class ShotItem(
     val stepName: String,
     val at: Long,
     val codeValue: String = "",
+    /** AI 读出来的值。空 = 还没跑或者没跑出来 */
+    val aiText: String = "",
+    /** 空=没任务 pending=排队中 ok=已出值 rejected=人工否掉 */
+    val aiState: String = "",
 )
 
 fun readShots(serialNo: String): List<ShotItem> = Archive.shots(serialNo).map { f ->
@@ -87,6 +91,8 @@ fun readShots(serialNo: String): List<ShotItem> = Archive.shots(serialNo).map { 
         stepName = side?.optString("stepName") ?: "",
         at = side?.optLong("capturedAt", f.lastModified()) ?: f.lastModified(),
         codeValue = side?.optString("codeValue") ?: "",
+        aiText = side?.optString("aiText") ?: "",
+        aiState = side?.optString("aiState") ?: "",
     )
 }
 
@@ -107,6 +113,10 @@ fun ProjectDetailScreen(
     onEditShot: (ShotItem, String, List<String>, String) -> Unit,
     onApplyEdit: (ShotItem, Anchor, Int) -> Unit,
     onRetake: (ShotItem) -> Unit,
+    /** 正在跑批时的进度文案，null 表示没在跑 */
+    aiProgress: String?,
+    onRunAi: () -> Unit,
+    onStopAi: () -> Unit,
     onBack: () -> Unit,
 ) {
     // 打开查看器时记的是下标而不是对象 —— 左右滑动要靠它在整个列表里走
@@ -197,6 +207,14 @@ fun ProjectDetailScreen(
             NoteBox(project.note, onSetNote)
 
             Spacer(Modifier.height(12.dp))
+
+            AiBar(
+                pending = shots.count { it.aiState == "pending" },
+                readCount = shots.count { it.aiText.isNotBlank() },
+                progress = aiProgress,
+                onRun = onRunAi,
+                onStop = onStopAi,
+            )
 
             // 忙碌用琥珀，完成提示用绿色 —— 一个是"等着"，一个是"好了"
             (busy ?: note)?.let { msg ->
@@ -391,6 +409,86 @@ fun ProjectDetailScreen(
 }
 
 @OptIn(ExperimentalFoundationApi::class)
+/**
+ * AI 读数那一条。
+ *
+ * 不做进详情页就自动跑 —— 加载模型十几秒、吃一大块内存，
+ * 而你进这一页多半只是翻照片。要跑就自己点，代价看得见。
+ */
+@Composable
+private fun AiBar(
+    pending: Int,
+    readCount: Int,
+    progress: String?,
+    onRun: () -> Unit,
+    onStop: () -> Unit,
+) {
+    if (pending == 0 && readCount == 0 && progress == null) return
+
+    Column(
+        Modifier
+            .padding(horizontal = 20.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(Panel)
+            .padding(12.dp)
+    ) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f).padding(end = 10.dp)) {
+                Text(
+                    when {
+                        progress != null -> "AI 读数中"
+                        pending > 0 -> "待读数 $pending 张"
+                        else -> "AI 读数完成"
+                    },
+                    color = if (progress != null) Amber else Color.White,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium
+                )
+                if (readCount > 0) {
+                    Spacer(Modifier.height(3.dp))
+                    Text("已出值 $readCount 张，点开图片看内容", color = Steel, fontSize = 11.sp)
+                }
+            }
+            if (progress != null) {
+                Text(
+                    "停止",
+                    color = Steel,
+                    fontSize = 13.sp,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .border(1.dp, Steel, RoundedCornerShape(4.dp))
+                        .clickable(onClick = onStop)
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                )
+            } else if (pending > 0) {
+                Text(
+                    "开始",
+                    color = Ink,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Amber)
+                        .clickable(onClick = onRun)
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                )
+            }
+        }
+
+        progress?.let {
+            Spacer(Modifier.height(8.dp))
+            Text(it, color = Steel, fontSize = 11.sp, lineHeight = 16.sp, maxLines = 3)
+        }
+    }
+
+    Spacer(Modifier.height(12.dp))
+}
+
 @Composable
 private fun ThumbCell(
     item: ShotItem,
@@ -439,6 +537,22 @@ private fun ThumbCell(
             ) {
                 if (checked) Text("✓", color = Ink, fontSize = 11.sp, fontWeight = FontWeight.Bold)
             }
+        }
+
+        // 跑出 AI 值的角上打个 AI 标。放左下角，避开右上角那个码值绿点和多选勾
+        if (item.aiText.isNotBlank() && !selecting) {
+            Text(
+                "AI",
+                color = Ink,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(4.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(Color(0xFF7BC6FF))
+                    .padding(horizontal = 5.dp, vertical = 1.dp)
+            )
         }
 
         // 有码的角上点一个绿点，一眼看出哪些带了码值 —— 误带的也就好找了

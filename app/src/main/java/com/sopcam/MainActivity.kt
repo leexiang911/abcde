@@ -30,6 +30,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import com.sopcam.ai.AiBatch
 import com.sopcam.archive.Archive
 import com.sopcam.archive.ExportSettings
 import com.sopcam.archive.ExportStore
@@ -182,6 +183,10 @@ class MainActivity : ComponentActivity() {
     // 得退出重进才恢复。
     private var detailBusy by mutableStateOf<String?>(null)
     private var detailNote by mutableStateOf<String?>(null)
+    /** AI 跑批的进度文案，null 表示没在跑 */
+    private var aiProgress by mutableStateOf<String?>(null)
+    /** 握着跑批协程，退出详情页时要取消掉，不能让模型在后台继续烧电 */
+    private var aiJob: Job? = null
     private var noteJob: Job? = null
     private var scanForSearch = false
     private lateinit var analysis: ImageAnalysis
@@ -601,6 +606,9 @@ class MainActivity : ComponentActivity() {
                             Archive.updateSidecarWatermark(item.file, headline, lines, name)
                             openShots = readShots(p.serialNo)
                         },
+                        aiProgress = aiProgress,
+                        onRunAi = { runAi(p.serialNo) },
+                        onStopAi = { aiJob?.cancel() },
                         onDeleteProject = { scope ->
                             when (scope) {
                                 DeleteScope.GALLERY_ONLY -> Purge.galleryOf(this, p.serialNo)
@@ -624,6 +632,10 @@ class MainActivity : ComponentActivity() {
                             }
                         },
                         onBack = {
+                            // 离开这一页就停掉跑批 —— 模型很吃电，不能让它在你看不见的地方接着烧。
+                            // 已经出值的都写过盘了，下次进来接着跑剩下的
+                            aiJob?.cancel()
+                            aiProgress = null
                             // 可能在详情页删过图，回列表时张数要跟着变
                             projects = Archive.list()
                             openProject = null
@@ -977,6 +989,43 @@ class MainActivity : ComponentActivity() {
                 retakeNewPhoto = null
                 openShots = readShots(owner)
                 screen = Screen.PROJECT_DETAIL
+            }
+        }
+    }
+
+    /**
+     * 跑一个项目的 AI 读数。
+     *
+     * 整个跑在 IO 线程上：模型加载十几秒、每张推理一两秒，放主线程必 ANR。
+     * 结果由 AiBatch 一张一写盘，所以中途退出也不会前功尽弃。
+     */
+    private fun runAi(serialNo: String) {
+        if (aiJob?.isActive == true) return
+        aiProgress = "准备中，首次要加载模型，可能十几秒…"
+        aiJob = lifecycleScope.launch(Dispatchers.IO) {
+            val outcome = AiBatch.run(
+                ctx = this@MainActivity,
+                serialNo = serialNo,
+                modelPath = settings.aiModelPath,
+                deviceName = settings.aiDevice,
+            ) { done, total, last ->
+                lifecycleScope.launch(Dispatchers.Main) {
+                    aiProgress = "$done / $total  ·  $last"
+                }
+            }
+            withContext(Dispatchers.Main) {
+                aiProgress = null
+                openShots = readShots(serialNo)
+                showNote(
+                    when {
+                        outcome.error != null -> outcome.error
+                        outcome.cancelled -> "已停止，跑完的 ${outcome.done} 张已经存下了"
+                        outcome.done == 0 && outcome.failed == 0 -> "没有待读数的图片"
+                        outcome.failed > 0 ->
+                            "读完 ${outcome.done} 张，${outcome.failed} 张没读出来，可以再点一次重试"
+                        else -> "AI 读数完成，${outcome.done} 张有值，点开图片查看"
+                    }
+                )
             }
         }
     }

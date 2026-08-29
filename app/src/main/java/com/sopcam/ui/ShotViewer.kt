@@ -212,6 +212,23 @@ fun ShotViewer(
                         .padding(horizontal = 10.dp, vertical = 6.dp)
                 )
             }
+            // AI 读出来的值。跟码值一样点一下复制 —— 多半是要填进报表的数
+            if (item.aiText.isNotBlank()) {
+                Spacer(Modifier.height(7.dp))
+                Text(
+                    "AI  ${item.aiText}",
+                    color = Color(0xFF7BC6FF),
+                    fontSize = 12.sp,
+                    lineHeight = 18.sp,
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color(0x2247A9E8))
+                        .clickable { copyToClipboard(ctx, item.aiText) }
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                )
+            }
         }
 
         /* ---------- 底部操作区 ---------- */
