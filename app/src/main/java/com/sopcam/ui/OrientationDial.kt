@@ -32,6 +32,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
@@ -63,6 +65,28 @@ private val cornerAlignments = listOf(
     Alignment.BottomStart,
 )
 
+/**
+ * 转 90/270 度并且**把转后的尺寸报给父布局**。
+ *
+ * Modifier.rotate 只转绘制，不动布局尺寸：一个 210x40 的块转 90 度以后
+ * 画出来是 40x210，但父布局仍按 210x40 摆位，多出来的部分伸到取景框外面，
+ * 被取景框的 clip 切掉 —— 竖着拍时水印开头那几个字就是这么没的。
+ *
+ * 这里先无约束量一次真实尺寸，再按转后的外接矩形报尺寸，把内容居中放进去。
+ * 旋转以内容自身中心为轴，所以转完正好填满报出去的那块地方。
+ */
+private fun Modifier.rotateInPlace(degrees: Float): Modifier = this.layout { measurable, _ ->
+    val p = measurable.measure(Constraints())
+    val swap = (((degrees / 90f).toInt() % 4) + 4) % 4 % 2 != 0
+    val w = if (swap) p.height else p.width
+    val h = if (swap) p.width else p.height
+    layout(w, h) {
+        p.placeWithLayer(x = (w - p.width) / 2, y = (h - p.height) / 2) {
+            rotationZ = degrees
+        }
+    }
+}
+
 @Composable
 fun BoxScope.WatermarkPreview(
     headline: String?,
@@ -76,7 +100,7 @@ fun BoxScope.WatermarkPreview(
         Modifier
             .align(cornerAlignments[anchor.previewCornerIndex(edge)])
             .padding(14.dp)
-            .rotate(edge.quarterTurns() * 90f)
+            .rotateInPlace(edge.quarterTurns() * 90f)
             .widthIn(max = 210.dp)
             .clip(RoundedCornerShape(4.dp))
             .background(Color(0xA6101418))

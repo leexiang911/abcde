@@ -103,7 +103,6 @@ fun CameraScreen(
     onFocusCancel: () -> Unit,
     onCodeClear: () -> Unit,
     onShutter: () -> Unit,
-    onExit: () -> Unit,
     bindPreview: (PreviewView) -> Unit,
 ) {
     // 向左拖多远算锁定。太短容易误锁，太长单手够不着。
@@ -127,12 +126,13 @@ fun CameraScreen(
 
             Spacer(Modifier.height(36.dp))
 
+            // 退出交给系统返回键（MainActivity 里已经接管，还会拦"照片没存完"），
+            // 屏幕上少一个常年占位、一天按不到一次的按钮
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Tag("收工", effectiveEdge, onClick = onExit)
                 if (queueDepth > 0) {
                     Text(
                         "存盘 $queueDepth",
@@ -208,9 +208,6 @@ fun CameraScreen(
                     )
                 }
 
-                if (watermarkVisible) {
-                    WatermarkPreview(watermarkHeadline, watermarkLines, anchor, effectiveEdge)
-                }
                 TopEdgeMarker(edge, effectiveEdge)
 
                 // 变焦档位压在取景框底部：手指本来就在这个区域，
@@ -221,6 +218,12 @@ fun CameraScreen(
                         .padding(bottom = 12.dp)
                 ) {
                     ZoomBar(zoomRatio, minZoom, maxZoom, onZoomPick)
+                }
+
+                // 水印画在最后 —— 它是所见即所得的那一层，被变焦条压住就等于预览撒谎。
+                // 这个 Column 没有任何点击修饰符，盖在变焦条上也不会挡住点它
+                if (watermarkVisible) {
+                    WatermarkPreview(watermarkHeadline, watermarkLines, anchor, effectiveEdge)
                 }
             }
             }

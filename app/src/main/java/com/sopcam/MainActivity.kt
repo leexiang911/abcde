@@ -752,16 +752,6 @@ class MainActivity : ComponentActivity() {
                         if (!armed && focusSpot == null) Optics.cancelFocus(camera)
                     },
                     onShutter = ::capture,
-                    onExit = {
-                        if (pipeline.busy()) {
-                            lastSaved = "还有 ${pipeline.pending.get()} 张在存，稍等一下"
-                        } else {
-                            persist()
-                            camera?.cameraControl?.enableTorch(false)
-                            releaseFocus()
-                            screen = Screen.SETUP
-                        }
-                    },
                     bindPreview = ::bindPreview
                 )
             }
