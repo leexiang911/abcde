@@ -44,6 +44,26 @@ object Restorer {
         val total: Int get() = written + skipped + failed
     }
 
+    /** 烧好水印的一张成片，还没落地 —— 落到相册还是导出目录由调用方决定 */
+    data class Rendered(
+        val bytes: ByteArray,
+        val width: Int,
+        val height: Int,
+        val meta: ImageMeta,
+        val displayName: String,
+        val relativePath: String,
+    )
+
+    /**
+     * 把归档原图烧成成片，返回字节，不落盘。
+     *
+     * 从 one() 里抽出来的，因为导出单张也要走同一套旋转 + 水印逻辑。
+     * 两边各写一遍迟早会分叉 —— 改了这边忘了那边，导出的图和相册里的就不一样了。
+     */
+    fun render(raw: File, jpegQuality: Int = 92): Rendered? = runCatching {
+        renderInner(raw, jpegQuality)
+    }.getOrNull()
+
     fun one(
         ctx: Context,
         raw: File,
@@ -51,6 +71,23 @@ object Restorer {
         overwrite: Boolean = false,
         taken: MutableSet<String>? = null,
     ): Outcome = runCatching {
+        val r = renderInner(raw, jpegQuality) ?: return Outcome.FAILED
+
+        // 同一步骤同一分钟内拍的两张，算出来的名字是一样的 ——
+        // 不错开的话第二张会被当成"已经有了"跳过，两张原图只落成一个成片。
+        val unique = taken?.let { claim(it, r.relativePath, r.displayName) } ?: r.displayName
+
+        val existing = Gallery.fileAt(r.relativePath, unique)
+        if (existing.exists()) {
+            if (!overwrite) return Outcome.SKIPPED
+            Gallery.delete(ctx, listOf(existing))
+        }
+
+        MediaWriter.write(ctx, r.bytes, unique, r.relativePath, r.meta, r.width, r.height)
+        Outcome.WRITTEN
+    }.getOrDefault(Outcome.FAILED)
+
+    private fun renderInner(raw: File, jpegQuality: Int): Rendered? {
         val side = Archive.sidecar(raw) ?: JSONObject()
         val serialNo = side.optString("serialNo").ifBlank { raw.parentFile?.name ?: "" }
         val at = side.optLong("capturedAt", raw.lastModified())
@@ -60,7 +97,7 @@ object Restorer {
         val bmp = BitmapFactory.decodeFile(
             raw.path,
             BitmapFactory.Options().apply { inMutable = true }
-        ) ?: return Outcome.FAILED
+        ) ?: return null
 
         val lines = side.optJSONArray("lines")?.let { arr ->
             (0 until arr.length()).map { arr.optString(it) }
@@ -114,19 +151,8 @@ object Restorer {
         val display = side.optString("fileName").ifBlank { fallbackName(side, at) } + ".jpg"
         val path = side.optString("relativePath").ifBlank { fallbackPath(serialNo, at) }
 
-        // 同一步骤同一分钟内拍的两张，算出来的名字是一样的 ——
-        // 不错开的话第二张会被当成"已经有了"跳过，两张原图只落成一个成片。
-        val unique = taken?.let { claim(it, path, display) } ?: display
-
-        val existing = Gallery.fileAt(path, unique)
-        if (existing.exists()) {
-            if (!overwrite) return Outcome.SKIPPED
-            Gallery.delete(ctx, listOf(existing))
-        }
-
-        MediaWriter.write(ctx, bytes, unique, path, meta, w, h)
-        Outcome.WRITTEN
-    }.getOrDefault(Outcome.FAILED)
+        return Rendered(bytes, w, h, meta, display, path)
+    }
 
     /** 这一轮里已经用掉的名字，撞了就加序号 */
     private fun claim(taken: MutableSet<String>, path: String, display: String): String {

@@ -186,16 +186,6 @@ fun ProjectDetailScreen(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                Text(
-                    "返回",
-                    color = Amber,
-                    fontSize = 13.sp,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .border(1.dp, Amber, RoundedCornerShape(4.dp))
-                        .clickable(onClick = onBack)
-                        .padding(horizontal = 14.dp, vertical = 9.dp)
-                )
             }
 
             Spacer(Modifier.height(14.dp))
@@ -539,22 +529,6 @@ private fun ThumbCell(
             }
         }
 
-        // 跑出 AI 值的角上打个 AI 标。放左下角，避开右上角那个码值绿点和多选勾
-        if (item.aiText.isNotBlank() && !selecting) {
-            Text(
-                "AI",
-                color = Ink,
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(4.dp)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(Color(0xFF7BC6FF))
-                    .padding(horizontal = 5.dp, vertical = 1.dp)
-            )
-        }
-
         // 有码的角上点一个绿点，一眼看出哪些带了码值 —— 误带的也就好找了
         if (item.codeValue.isNotBlank() && !selecting) {
             Box(
@@ -567,19 +541,39 @@ private fun ThumbCell(
             )
         }
 
-        if (item.stepOrder > 0) {
-            Text(
-                item.stepOrder.toString().padStart(2, '0'),
-                color = Ink,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(4.dp)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(Amber)
-                    .padding(horizontal = 5.dp, vertical = 2.dp)
-            )
+        // 序号和 AI 标排一行贴左上角。视线本来就先落在序号上，AI 标跟在后面是顺读的；
+        // 挨着右上角那个码值绿点反而要分辨哪个是哪个。
+        // 自由拍摄没有序号，那 AI 标自己占这个位置，不会漂
+        if (item.stepOrder > 0 || (item.aiText.isNotBlank() && !selecting)) {
+            Row(
+                Modifier.align(Alignment.TopStart).padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                if (item.stepOrder > 0) {
+                    Text(
+                        item.stepOrder.toString().padStart(2, '0'),
+                        color = Ink,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(Amber)
+                            .padding(horizontal = 5.dp, vertical = 2.dp)
+                    )
+                }
+                if (item.aiText.isNotBlank() && !selecting) {
+                    Text(
+                        "AI",
+                        color = Ink,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(Color(0xFF7BC6FF))
+                            .padding(horizontal = 5.dp, vertical = 2.dp)
+                    )
+                }
+            }
         }
 
         Text(
@@ -860,7 +854,7 @@ private fun StatusPicker(current: Archive.Status, onPick: (Archive.Status) -> Un
 }
 
 
-enum class BatchAction { SCAN, CLEAR_CODE, DELETE }
+enum class BatchAction { SCAN, CLEAR_CODE, EXPORT, DELETE }
 
 private fun toggle(set: Set<String>, item: ShotItem): Set<String> {
     val k = item.file.absolutePath
@@ -900,11 +894,21 @@ private fun BatchBar(
             return@Column
         }
 
+        // 四个按钮挤一行标签就要截断，拆成两行：识别那组一行，出图和删除一行
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             BatchButton("批量扫码", Done, Ink, Modifier.weight(1f)) { onAction(BatchAction.SCAN) }
             BatchButton("清除码值", Color(0xFF262D35), Color.White, Modifier.weight(1f)) {
                 onAction(BatchAction.CLEAR_CODE)
             }
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            BatchButton(
+                if (count == 1) "导出这张" else "导出 $count 张",
+                Amber, Ink, Modifier.weight(1f)
+            ) { onAction(BatchAction.EXPORT) }
             BatchButton("删除", Color(0xFF3A2326), Color(0xFFE86A5C), onClick = onRequestDelete)
         }
     }
@@ -982,6 +986,8 @@ private fun NoteBox(note: String, onSave: (String) -> Unit) {
     if (!editing) {
         Row(
             Modifier
+                // 跟状态块、AI 条一样的 20dp，之前是通栏的，只有它跟别人不齐
+                .padding(horizontal = 20.dp)
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(8.dp))
                 .background(Panel)
@@ -1003,6 +1009,7 @@ private fun NoteBox(note: String, onSave: (String) -> Unit) {
 
     Column(
         Modifier
+            .padding(horizontal = 20.dp)
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(Panel)

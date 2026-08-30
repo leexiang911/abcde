@@ -320,11 +320,7 @@ class MainActivity : ComponentActivity() {
             BackHandler(enabled = screen != Screen.SETUP) {
                 when (screen) {
                     Screen.RETAKE_CONFIRM -> discardRetake()
-                    Screen.PROJECT_DETAIL -> {
-                        projects = Archive.list()
-                        openProject = null
-                        screen = Screen.PROJECTS
-                    }
+                    Screen.PROJECT_DETAIL -> leaveDetail()
                     Screen.SHOT_CONFIRM -> dropHeld()
                     Screen.AI_LAB -> screen = Screen.SETTINGS
                     Screen.PROJECTS -> {
@@ -631,17 +627,7 @@ class MainActivity : ComponentActivity() {
                                 screen = Screen.PROJECTS
                             }
                         },
-                        onBack = {
-                            // 离开这一页就停掉跑批 —— 模型很吃电，不能让它在你看不见的地方接着烧。
-                            // 已经出值的都写过盘了，下次进来接着跑剩下的
-                            aiJob?.cancel()
-                            aiProgress = null
-                            // 可能在详情页删过图，回列表时张数要跟着变
-                            projects = Archive.list()
-                            openProject = null
-                            detailBusy = null
-                            screen = Screen.PROJECTS
-                        }
+                        onBack = ::leaveDetail
                     )
                 }
 
@@ -833,9 +819,35 @@ class MainActivity : ComponentActivity() {
      */
     private fun runBatch(serialNo: String, items: List<ShotItem>, act: BatchAction) {
         if (items.isEmpty()) return
+
+        // 导出跟其他三个不一样：它不是逐张改数据，而是最后交出一个文件去分享，
+        // 塞进下面那个 forEach 循环里会很别扭，单独走一条
+        if (act == BatchAction.EXPORT) {
+            detailBusy = "出图中 0 / ${items.size}"
+            lifecycleScope.launch(Dispatchers.IO) {
+                val out = Exporter.exportShots(
+                    this@MainActivity, items.map { it.file }
+                ) { done, total ->
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        detailBusy = "出图中 $done / $total"
+                    }
+                }
+                withContext(Dispatchers.Main) {
+                    detailBusy = null
+                    if (out == null) {
+                        showNote("导出失败")
+                    } else {
+                        Exporter.share(this@MainActivity, out)
+                    }
+                }
+            }
+            return
+        }
+
         detailBusy = when (act) {
             BatchAction.SCAN -> "识别中 0 / ${items.size}"
             BatchAction.CLEAR_CODE -> "清除中…"
+            BatchAction.EXPORT -> ""
             BatchAction.DELETE -> "删除中…"
         }
         lifecycleScope.launch(Dispatchers.IO) {
@@ -858,6 +870,8 @@ class MainActivity : ComponentActivity() {
                         Archive.clearSidecarCode(item.file)
                         hit++
                     }
+                    // 上面已经提前返回了，走不到这儿
+                    BatchAction.EXPORT -> Unit
                     BatchAction.DELETE -> {
                         Purge.shot(item.file)
                         Thumbs.evict(item.file)
@@ -873,6 +887,7 @@ class MainActivity : ComponentActivity() {
                     when (act) {
                         BatchAction.SCAN -> "识别出 $hit / ${items.size} 张"
                         BatchAction.CLEAR_CODE -> "已清除 $hit 张的码值"
+                        BatchAction.EXPORT -> ""
                         BatchAction.DELETE -> "已删除 $hit 张"
                     }
                 )
@@ -1028,6 +1043,23 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    /**
+     * 离开项目详情页的收尾。
+     *
+     * 页面上的返回按钮已经去掉了，只剩系统返回键这一个出口 —— 所以清理必须挂在这里，
+     * 挂在按钮上等于没挂。尤其是 AI 跑批：模型很吃电，不能让它在你看不见的地方接着烧。
+     * 已经出值的都写过盘了，下次进来接着跑剩下的。
+     */
+    private fun leaveDetail() {
+        aiJob?.cancel()
+        aiProgress = null
+        // 可能在详情页删过图，回列表时张数要跟着变
+        projects = Archive.list()
+        openProject = null
+        detailBusy = null
+        screen = Screen.PROJECTS
     }
 
     /** 提示只是提示，2.5 秒后自动收走，不该挡住任何操作 */

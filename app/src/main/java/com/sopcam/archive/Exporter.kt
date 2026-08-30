@@ -253,12 +253,59 @@ object Exporter {
         zip.closeEntry()
     }
 
+    /**
+     * 导出选中的几张成片。
+     *
+     * 当场烧水印，不走相册 —— 你旋转过、改过水印文字的，导出的就是改完的样子，
+     * 不用先"重烧回相册"再去相册里翻。
+     *
+     * 一张就出 jpg 直接发图，多张才打 zip：发一张图给人，对方收到的应该是图，
+     * 不是一个要解压的包。
+     */
+    fun exportShots(
+        ctx: Context,
+        raws: List<File>,
+        onProgress: (Int, Int) -> Unit = { _, _ -> },
+    ): File? = runCatching {
+        if (raws.isEmpty()) return null
+        val dir = exportDir().apply { mkdirs() }
+
+        if (raws.size == 1) {
+            val r = Restorer.render(raws[0]) ?: return null
+            onProgress(1, 1)
+            return File(dir, r.displayName).apply { writeBytes(r.bytes) }
+        }
+
+        val zip = File(dir, "SOP选图-" + stampFmt.format(Date()) + ".zip")
+        val taken = HashSet<String>()
+        ZipOutputStream(zip.outputStream().buffered()).use { out ->
+            raws.forEachIndexed { i, raw ->
+                Restorer.render(raw)?.let { r ->
+                    // 同一步骤同一分钟拍的两张会重名，撞了就加序号 ——
+                    // 不然 zip 里后一张把前一张顶掉，导出 5 张只剩 4 张
+                    var name = r.displayName
+                    var n = 2
+                    while (!taken.add(name)) {
+                        name = r.displayName.substringBeforeLast('.') + "_" + n + ".jpg"
+                        n++
+                    }
+                    out.putNextEntry(ZipEntry(name))
+                    out.write(r.bytes)
+                    out.closeEntry()
+                }
+                onProgress(i + 1, raws.size)
+            }
+        }
+        zip
+    }.getOrNull()
+
     /** 丢给微信 / 企业微信 / QQ 之类。走 FileProvider，直接传 file:// 会被系统拦下 */
-    fun share(ctx: Context, zip: File) {
+    fun share(ctx: Context, file: File) {
         runCatching {
-            val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", zip)
+            val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", file)
             val intent = Intent(Intent.ACTION_SEND).apply {
-                type = "application/zip"
+                // 单张发图片、多张发包 —— 类型报错了微信会直接拒收
+                type = if (file.extension.equals("zip", true)) "application/zip" else "image/jpeg"
                 putExtra(Intent.EXTRA_STREAM, uri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
