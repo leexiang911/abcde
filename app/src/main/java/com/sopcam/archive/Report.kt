@@ -43,27 +43,21 @@ object Report {
 
         serials.forEach { sn ->
             val meta = index[sn]
-            // 分组键是「序号 + 步骤名」，不能只用序号 ——
-            // 同一个控制器上用过两套流程时，两套的序号都从 1 开始，
-            // 只按序号分会把「01 松开obc_can_H波形」并进「01 插入obc控制板不工作」里，
-            // 标题还取先遇到的那个，看起来就是照片跑错了栏目
             val steps = LinkedHashMap<String, JSONObject>()
+            // 分组横跨哪些序号、叫什么名字，先算一遍 —— 行和文件夹都照这个来
+            val rows = rowsOf(sn, template)
 
             Archive.shots(sn).forEach { raw ->
                 val side = Archive.sidecar(raw) ?: JSONObject()
-                val order = side.optInt("stepOrder", 0)
-                // 分组三级回退：
-                //  ① 元数据里的 stepGroup —— 拍照那刻按流程配置写下的，最可靠
-                //  ② 文件名 —— 用户改过名的话，那才是他要的（stepName 会停在旧步骤上）
-                //  ③ stepName —— 老照片的兜底
-                val (_, name) = groupOf(side, raw)
+                val key = keyOf(side, raw).first
+                val (order, name) = rows[key] ?: (side.optInt("stepOrder", 0) to "自由拍摄")
                 val point = side.optString("stepPoint")
-                val key = "$order|$name"
 
                 val group = steps.getOrPut(key) {
                     JSONObject()
                         .put("order", order)
                         .put("name", name)
+                        .put("key", key)
                         .put("firstAt", side.optLong("capturedAt", raw.lastModified()))
                         .put("refDes", side.optString("stepRefDes"))
                         .put("shots", JSONArray())
@@ -91,6 +85,9 @@ object Report {
                         .put("at", side.optLong("capturedAt", raw.lastModified()))
                         .put("time", shotFmt.format(Date(side.optLong("capturedAt", raw.lastModified()))))
                         .put("code", side.optString("codeValue"))
+                        // 合成一行之后，组里这几张分别是哪个测试项，就只剩这个字段说得清了
+                        //（温度1 一行下面既有阻值也有电压）
+                        .put("step", side.optString("stepName"))
                         // 拍照时打的备注。跟着这张图走，不并到组上 ——
                         // 一组里几张图各说各的事，合在一起就分不清哪句对应哪张
                         .put("note", side.optString("note"))
@@ -127,15 +124,22 @@ object Report {
 
             // 把判定规则拌进去，报表页面自己算 —— 数一填完当场出正常/异常
             ordered.forEach { g ->
-                val row = g.optString("name")
-                template?.groupOf(row)?.let { gr ->
-                    gr.rule?.let { g.put("groupRule", it.toJson()) }
-                    if (gr.unit.isNotBlank()) g.put("unit", gr.unit)
-                }
-                val step = template?.steps?.firstOrNull { it.rowName() == row }
-                step?.let { st ->
-                    st.rule?.let { g.put("valueRule", it.toJson()) }
-                    if (st.unit.isNotBlank() && g.optString("unit").isBlank()) g.put("unit", st.unit)
+                val key = g.optString("key")
+                if (key.startsWith(GROUP_PREFIX)) {
+                    // 分组行的规则和单位取组上的。这里必须拿组 id 去查 ——
+                    // 显示名已经换成中文了，用它撞 rowName() 撞不上
+                    template?.groupOf(key.removePrefix(GROUP_PREFIX))?.let { gr ->
+                        gr.rule?.let { g.put("groupRule", it.toJson()) }
+                        if (gr.unit.isNotBlank()) g.put("unit", gr.unit)
+                    }
+                } else {
+                    val row = g.optString("name")
+                    template?.steps?.firstOrNull { it.rowName() == row }?.let { st ->
+                        st.rule?.let { g.put("valueRule", it.toJson()) }
+                        if (st.unit.isNotBlank() && g.optString("unit").isBlank()) {
+                            g.put("unit", st.unit)
+                        }
+                    }
                 }
             }
 
@@ -168,15 +172,59 @@ object Report {
             .replace("__DATA__", safe)
     }
 
-    /** 这张照片归到哪一组：返回（序号，组名） */
-    private fun groupOf(side: JSONObject, raw: File): Pair<Int, String> {
+    /** 分组行的键前缀。带这个前缀的，冒号后面是流程配置里的组 id */
+    const val GROUP_PREFIX = "g|"
+
+    /**
+     * 这张照片归到哪一行：返回（行键，这张自己的序号）。
+     *
+     * 配了分组的，键里**不带序号** —— 温度1 的阻值在 02、电压在 07，
+     * 带上序号就成了两行，报表上一堆重名。分组的意义就是并成一行。
+     *
+     * 没配分组的还是「序号 + 名字」：同一个控制器上跑过两套流程时，
+     * 两套的序号都从 1 开始，只按名字分会把不相干的两项并到一起。
+     * 名字三级回退：文件名（用户改过名的话那才是他要的）→ stepName → 自由拍摄。
+     */
+    private fun keyOf(side: JSONObject, raw: File): Pair<String, Int> {
         val order = side.optInt("stepOrder", 0)
+        val group = side.optString("stepGroup")
+        if (group.isNotBlank()) return GROUP_PREFIX + group to order
         val fileStem = side.optString("fileName").ifBlank { raw.nameWithoutExtension }
-        val name = side.optString("stepGroup")
-            .ifBlank { labelOf(fileStem) }
+        val name = labelOf(fileStem)
             .ifBlank { side.optString("stepName") }
             .ifBlank { "自由拍摄" }
-        return order to name
+        return "s|$order|$name" to order
+    }
+
+    /**
+     * 行键 → 显示名。
+     *
+     * 元数据里存的 stepGroup 是组 **id**（temp1、net_pins），报表上要显示的是
+     * 流程配置里的中文名。查不到（老照片、流程已删）就退回 id，
+     * 至少还是个能认出来的字符串。
+     */
+    private fun labelFor(key: String, template: SopTemplate?): String {
+        if (!key.startsWith(GROUP_PREFIX)) return key.substringAfterLast('|')
+        val id = key.removePrefix(GROUP_PREFIX)
+        return template?.groupOf(id)?.name?.ifBlank { id } ?: id
+    }
+
+    /**
+     * 一个项目里，每一行归到哪个序号、叫什么名字。
+     *
+     * 分组可能横跨好几个序号，但报表只有一行、导出只有一个文件夹，
+     * 所以统一取组内最小的那个序号。manifest 和 folderMap 都走这里，
+     * 两边各算一遍必然对不上 —— 报表上写着 02_温度1，包里却是 07_温度1。
+     */
+    private fun rowsOf(serialNo: String, template: SopTemplate?): Map<String, Pair<Int, String>> {
+        val out = LinkedHashMap<String, Pair<Int, String>>()
+        Archive.shots(serialNo).forEach { raw ->
+            val side = Archive.sidecar(raw) ?: return@forEach
+            val (key, order) = keyOf(side, raw)
+            val prev = out[key]
+            if (prev == null || order < prev.first) out[key] = order to labelFor(key, template)
+        }
+        return out
     }
 
     private val illegalInName = Regex("[\\\\/:*?\"<>|\\r\\n\\t]")
@@ -193,12 +241,19 @@ object Report {
         return if (order > 0) "%02d_%s".format(order, clean) else "00_$clean"
     }
 
-    /** 成片文件名（不含扩展名）→ 它该进哪个子文件夹 */
-    fun folderMap(serialNo: String): Map<String, String> {
+    /**
+     * 成片文件名（不含扩展名）→ 它该进哪个子文件夹。
+     *
+     * 必须跟 manifest 走同一套 rowsOf，否则报表里那个「点一下复制文件夹名」
+     * 复制出来的名字，在包里根本不存在。
+     */
+    fun folderMap(serialNo: String, template: SopTemplate? = null): Map<String, String> {
         val out = LinkedHashMap<String, String>()
+        val rows = rowsOf(serialNo, template)
         Archive.shots(serialNo).forEach { raw ->
             val side = Archive.sidecar(raw) ?: return@forEach
-            val (order, name) = groupOf(side, raw)
+            val key = keyOf(side, raw).first
+            val (order, name) = rows[key] ?: return@forEach
             val stem = side.optString("fileName").ifBlank { raw.nameWithoutExtension }
             out[stem] = folderOf(order, name)
         }
@@ -351,7 +406,8 @@ figure img{width:172px;height:129px;object-fit:cover;border:1px solid var(--rule
   background:#fff;cursor:zoom-in;display:block}
 figure img:hover{border-color:var(--ink)}
 figcaption{font-family:var(--mono);font-size:10.5px;color:var(--mute);
-  margin-top:4px;text-align:center}
+  margin-top:4px;text-align:center;width:172px;line-height:1.4;
+  word-break:break-word}
 /* 单张图的备注：压在缩略图下沿，跟图绑死 —— 一屏几十张图，
    备注挨着图放都可能看串行，盖在图上就不会认错是哪张。
    最多三行，长备注在这儿截断；完整内容点开大图看，那边能一键复制。
@@ -551,7 +607,10 @@ function render(){
         if (sh.ai) html += '<div class="shotai">' + esc(sh.ai) + '</div>';
         if (sh.note) html += '<div class="shotnote">' + esc(sh.note) + '</div>';
         html += '</div>';
-        html += '<figcaption>' + esc(sh.time) + '</figcaption>';
+        // 合并成一行之后，光看时间分不清哪张是阻值哪张是电压 ——
+        // 测试项名跟行名不一样时才标出来，一样就没必要重复
+        var cap = (sh.step && sh.step !== s.name) ? sh.step + '　' + sh.time : sh.time;
+        html += '<figcaption>' + esc(cap) + '</figcaption>';
         html += '</figure>';
       });
       html += '</div>';
