@@ -1,5 +1,6 @@
 package com.sopcam.archive
 
+import com.sopcam.ai.Placeholders
 import com.sopcam.sop.FileNaming
 import com.sopcam.sop.SopTemplate
 import java.io.File
@@ -123,6 +124,11 @@ object Report {
             )
 
             // 把判定规则拌进去，报表页面自己算 —— 数一填完当场出正常/异常
+            // 组装值现算，不存盘 —— 你在手机上改过某张的 AI 读数之后，
+            // 导出的报表就该按改后的值重拼。存下来的话必然有一份是旧的
+            val shotIndex = Placeholders.indexOf(sn, template)
+            val groupResults = Archive.groupAi(sn)
+
             ordered.forEach { g ->
                 val key = g.optString("key")
                 if (key.startsWith(GROUP_PREFIX)) {
@@ -131,6 +137,14 @@ object Report {
                     template?.groupOf(key.removePrefix(GROUP_PREFIX))?.let { gr ->
                         gr.rule?.let { g.put("groupRule", it.toJson()) }
                         if (gr.unit.isNotBlank()) g.put("unit", gr.unit)
+                        if (gr.format.isNotBlank()) {
+                            g.put(
+                                "assembled",
+                                Placeholders.expand(gr.format, shotIndex, groupResults).first
+                            )
+                        }
+                        groupResults[gr.id]?.takeIf { it.isNotBlank() }
+                            ?.let { g.put("groupAi", it) }
                     }
                 } else {
                     val row = g.optString("name")
@@ -414,6 +428,17 @@ figcaption{font-family:var(--mono);font-size:10.5px;color:var(--mute);
    pointer-events:none 是为了点到备注上也照样开大图，别在小图上做两种点击 */
 /* AI 读数：跟备注一样压在图上，但压在上沿、用蓝色，
    一眼分得清哪句是人写的、哪句是机器读的 */
+/* 组装值 / AI 结论：跟在图组下面各占一栏。点一下整条复制 ——
+   复制出来是纯值，不带「组装值」这个标签 */
+.asm{margin-top:10px;display:flex;align-items:baseline;gap:10px;
+  padding:8px 10px;background:#fff;border:1px solid var(--rule);
+  border-left:3px solid var(--mark);cursor:copy}
+.asm:hover{background:#FFFDF2}
+.asm label{font-family:var(--mono);font-size:10.5px;color:var(--mute);
+  flex:0 0 auto;text-transform:none}
+.asm span{font-size:14px;line-height:1.6;color:var(--ink);
+  word-break:break-word;user-select:text;-webkit-user-select:text}
+.asm.gai{border-left-color:#7BC6FF}
 .shotai{position:absolute;left:1px;right:1px;top:1px;
   font-size:11px;line-height:1.35;color:#0B2434;text-align:left;
   padding:4px 6px;background:rgba(123,198,255,.92);
@@ -614,6 +639,21 @@ function render(){
         html += '</figure>';
       });
       html += '</div>';
+
+      // 组装值单独一栏：一个项目十几个分组，值挤进那个数值框里看不清，
+      // 而且那个框是留给你手填结论的
+      if (s.assembled) {
+        html += '<div class="asm copyable" data-copy="' + esc(s.assembled) + '">';
+        html += '<label>组装值</label>';
+        html += '<span>' + esc(s.assembled) + '</span>';
+        html += '</div>';
+      }
+      if (s.groupAi) {
+        html += '<div class="asm gai copyable" data-copy="' + esc(s.groupAi) + '">';
+        html += '<label>AI 结论</label>';
+        html += '<span>' + esc(s.groupAi) + '</span>';
+        html += '</div>';
+      }
       html += '</div>';
 
       html += '<div class="data">';
@@ -857,12 +897,15 @@ function bindZoom(root){
       box.querySelector("img").src = img.getAttribute("data-full");
       // 有备注就把备注顶上来，没有才退回那句操作提示
       var a = img.getAttribute("data-ai") || "";
-      var n = [a ? "AI：" + a : "", img.getAttribute("data-note") || ""]
-              .filter(Boolean).join("\n");
+      var nt = img.getAttribute("data-note") || "";
+      // 显示带「AI：」前缀好分辨是机器读的，复制出来只要值本身 ——
+      // 这个数是要抄进系统的，带上前缀还得手动删
+      var shown = [a ? "AI：" + a : "", nt].filter(Boolean).join("\n");
+      var copyable = [a, nt].filter(Boolean).join("\n");
       var cap = box.querySelector(".cap");
-      cap.textContent = n || "右键可以复制图片";
-      cap.className = n ? "cap has" : "cap";
-      cap.setAttribute("data-copy", n);
+      cap.textContent = shown || "右键可以复制图片";
+      cap.className = shown ? "cap has" : "cap";
+      cap.setAttribute("data-copy", copyable);
       box.style.display = "flex";
     });
   });

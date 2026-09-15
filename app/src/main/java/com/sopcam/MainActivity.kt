@@ -1023,6 +1023,8 @@ class MainActivity : ComponentActivity() {
                 serialNo = serialNo,
                 modelPath = settings.aiModelPath,
                 deviceName = settings.aiDevice,
+                // 分组提示词和组装值都在流程配置里，不传模板就只能跑单张
+                template = templates.firstOrNull { it.id == templateId },
             ) { done, total, last ->
                 lifecycleScope.launch(Dispatchers.Main) {
                     aiProgress = "$done / $total  ·  $last"
@@ -1319,6 +1321,7 @@ class MainActivity : ComponentActivity() {
             stepName = step?.name ?: "",
             stepRefDes = step?.refDes ?: "",
             stepPoint = step?.point ?: "",
+            stepId = step?.id ?: "",
             stepGroup = step?.rowName() ?: "",
             // 这里刻意留空。
             //

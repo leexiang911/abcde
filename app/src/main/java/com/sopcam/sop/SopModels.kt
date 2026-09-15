@@ -107,12 +107,19 @@ data class SopGroup(
      * 取值不受分组边界限制 —— 想引用别的组里的照片也行。
      */
     val prompt: String = "",
+    /**
+     * 组装值模板。占位符跟 prompt 一样，但**不发给模型** ——
+     * 替换完就是这一组的显示值。只想把三相读数拼成一行时用它，不必等推理。
+     * 取不到的成员填「—」。只管显示，不参与判定。
+     */
+    val format: String = "",
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("id", id)
         .put("name", name)
         .put("unit", unit)
         .put("prompt", prompt)
+        .put("format", format)
         .put("members", JSONArray(members))
         .apply { rule?.let { put("rule", it.toJson()) } }
 
@@ -125,6 +132,7 @@ data class SopGroup(
                 rule = Rule.from(o.optJSONObject("rule")),
                 unit = o.optString("unit"),
                 prompt = o.optString("prompt"),
+                format = o.optString("format"),
                 members = (0 until m.length()).map { m.optString(it) }.filter { it.isNotBlank() },
             )
         }

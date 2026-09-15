@@ -23,6 +23,14 @@ data class ImageMeta(
     val platformName: String = "",
     val faultType: String = "",
     val stepOrder: Int = 0,
+    /**
+     * 流程配置里的测试项 ID（vd_up_u 这种）。
+     *
+     * 提示词里的 ${'$'}{vd_up_u.ai} 是按它取值的 —— 只存序号和名字的话，
+     * 事后根本没法把一张照片对回配置里的哪一项。老照片没有这个字段，
+     * 取值时退回按序号 + 名字在流程里反查。
+     */
+    val stepId: String = "",
     val stepName: String = "",
     val stepRefDes: String = "",
     /** 测点名，例如 "上桥U"。报表要靠它区分同一检查项下的几个测点 */
@@ -82,6 +90,7 @@ object Xmp {
             if (meta.stepOrder > 0) {
                 add("sopcam:StepOrder" to meta.stepOrder.toString())
                 add("sopcam:StepName" to meta.stepName)
+                if (meta.stepId.isNotBlank()) add("sopcam:StepId" to meta.stepId)
                 if (meta.stepRefDes.isNotBlank()) add("sopcam:StepRefDes" to meta.stepRefDes)
                 if (meta.stepPoint.isNotBlank()) add("sopcam:StepPoint" to meta.stepPoint)
                 if (meta.stepGroup.isNotBlank()) add("sopcam:StepGroup" to meta.stepGroup)

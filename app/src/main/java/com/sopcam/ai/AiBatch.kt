@@ -2,6 +2,7 @@ package com.sopcam.ai
 
 import android.content.Context
 import com.sopcam.archive.Archive
+import com.sopcam.sop.SopTemplate
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 import java.io.File
@@ -63,10 +64,13 @@ object AiBatch {
         serialNo: String,
         modelPath: String,
         deviceName: String,
+        template: SopTemplate?,
         onProgress: (Int, Int, String) -> Unit,
     ): Outcome {
         val tasks = pending(serialNo)
-        if (tasks.isEmpty()) return Outcome(0, 0, false)
+        // 分组只跑配了 prompt 的。只配 format 的组不用模型，报表那边现算
+        val groups = template?.groups.orEmpty().filter { it.prompt.isNotBlank() }
+        if (tasks.isEmpty() && groups.isEmpty()) return Outcome(0, 0, false)
 
         if (!LiteRt.isReady || LiteRt.loaded?.path != modelPath) {
             if (modelPath.isBlank()) {
@@ -80,6 +84,7 @@ object AiBatch {
             }
         }
 
+        val total = tasks.size + groups.size
         var done = 0
         var failed = 0
         for (t in tasks) {
@@ -93,11 +98,39 @@ object AiBatch {
             if (answer == null || answer.text.isBlank()) {
                 failed++
                 // 失败的留在 pending，下次还能再试 —— 有可能只是这次内存紧张
-                onProgress(done + failed, tasks.size, "读不出来：${t.file.name}")
+                onProgress(done + failed, total, "读不出来：${t.file.name}")
             } else {
                 Archive.setAiResult(t.file, answer.text, "ok")
                 done++
-                onProgress(done + failed, tasks.size, answer.text)
+                onProgress(done + failed, total, answer.text)
+            }
+        }
+
+        // 分组放在最后：组级提示词要把成员的读数拼进去问，
+        // 成员没跑完就问，等于拿一堆「—」去让模型下结论
+        val results = Archive.groupAi(serialNo).toMutableMap()
+        for (g in groups) {
+            if (!currentCoroutineContext().isActive) return Outcome(done, failed, true)
+
+            val shots = Placeholders.indexOf(serialNo, template)
+            val (text, missing) = Placeholders.expand(g.prompt, shots, results)
+            if (missing) {
+                // 成员还缺读数就跳过，不硬跑 —— 拿「—」问出来的结论是错的，
+                // 而且会被当成有效结果存下来，比没有更糟
+                failed++
+                onProgress(done + failed, total, "${g.name}：成员读数还不全，跳过")
+                continue
+            }
+
+            val r = LiteRt.ask(text).getOrNull()
+            if (r == null || r.text.isBlank()) {
+                failed++
+                onProgress(done + failed, total, "${g.name}：没出结论")
+            } else {
+                Archive.setGroupAi(serialNo, g.id, r.text)
+                results[g.id] = r.text
+                done++
+                onProgress(done + failed, total, "${g.name}：${r.text}")
             }
         }
         return Outcome(done, failed, false)

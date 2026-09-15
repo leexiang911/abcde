@@ -5,7 +5,9 @@ import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -33,11 +36,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -75,6 +80,7 @@ private enum class Tray { NONE, WATERMARK, ROTATE, MORE }
  * 改动是攒着的：调水印位置和角度只改本地状态，
  * 按「保存并应用」才一次性写 json 并重烧。避免调一下烧一次。
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ShotViewer(
     item: ShotItem,
@@ -98,6 +104,10 @@ fun ShotViewer(
     var cropping by remember(item.file.absolutePath) { mutableStateOf(false) }
     var cropNote by remember(item.file.absolutePath) { mutableStateOf<String?>(null) }
     var confirmDelete by remember(item.file.absolutePath) { mutableStateOf(false) }
+    // AI 读错了要能当场改：组装值和组级提示词都按这个值取数，
+    // 一个错值会顺着占位符污染整组的结论
+    var aiText by remember(item.file.absolutePath) { mutableStateOf(item.aiText) }
+    var editingAi by remember(item.file.absolutePath) { mutableStateOf(false) }
 
     // 水印内容从随行 json 读，预览要跟成片一致
     val side = remember(item.file.absolutePath) { Archive.sidecar(item.file) }
@@ -212,11 +222,13 @@ fun ShotViewer(
                         .padding(horizontal = 10.dp, vertical = 6.dp)
                 )
             }
-            // AI 读出来的值。跟码值一样点一下复制 —— 多半是要填进报表的数
-            if (item.aiText.isNotBlank()) {
+            // AI 读出来的值。点一下复制（只复制值本身，不带「AI」前缀 ——
+            // 这个数是要抄进系统的），长按改。读错了就地改掉，
+            // 组装值和组级提示词都按改后的值取数
+            if (aiText.isNotBlank()) {
                 Spacer(Modifier.height(7.dp))
                 Text(
-                    "AI  ${item.aiText}",
+                    "AI  $aiText",
                     color = Color(0xFF7BC6FF),
                     fontSize = 12.sp,
                     lineHeight = 18.sp,
@@ -225,8 +237,17 @@ fun ShotViewer(
                     modifier = Modifier
                         .clip(RoundedCornerShape(6.dp))
                         .background(Color(0x2247A9E8))
-                        .clickable { copyToClipboard(ctx, item.aiText) }
+                        .combinedClickable(
+                            onClick = { copyToClipboard(ctx, aiText) },
+                            onLongClick = { editingAi = true }
+                        )
                         .padding(horizontal = 10.dp, vertical = 6.dp)
+                )
+                Text(
+                    "长按可以改",
+                    color = Steel,
+                    fontSize = 10.sp,
+                    modifier = Modifier.padding(start = 10.dp, top = 3.dp)
                 )
             }
         }
@@ -355,6 +376,22 @@ fun ShotViewer(
                 onConfirm = {
                     confirmDelete = false
                     onDelete()
+                }
+            )
+        }
+
+        if (editingAi) {
+            EditAiDialog(
+                initial = aiText,
+                stepName = item.stepName,
+                onCancel = { editingAi = false },
+                onSave = { v ->
+                    editingAi = false
+                    aiText = v
+                    scope.launch(Dispatchers.IO) {
+                        // 人改过的标 ok，不是 pending —— 否则下次跑批又把它覆盖回去
+                        Archive.setAiResult(item.file, v, if (v.isBlank()) "rejected" else "ok")
+                    }
                 }
             )
         }
@@ -653,4 +690,96 @@ private fun BarButton(
             .clickable(onClick = onClick)
             .padding(vertical = 12.dp)
     )
+}
+
+/**
+ * 改 AI 读数。
+ *
+ * AI 读错一个数，后果不只是这一张难看：组装值和组级提示词都按占位符从这里取数，
+ * 一个错值会顺着 ${'$'}{步骤ID.ai} 污染整组的结论。所以必须能就地改。
+ *
+ * 清空保存等于否掉这个读数，标成 rejected —— 下次跑批不会再自动把它填回来。
+ */
+@Composable
+private fun EditAiDialog(
+    initial: String,
+    stepName: String,
+    onCancel: () -> Unit,
+    onSave: (String) -> Unit,
+) {
+    var text by remember { mutableStateOf(initial) }
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color(0xE6000000))
+            .clickable(onClick = onCancel),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            Modifier
+                .padding(24.dp)
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .background(Panel)
+                .clickable(enabled = false) {}
+                .padding(18.dp)
+        ) {
+            Text(
+                "改 AI 读数",
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                stepName.ifBlank { "这张照片" } + "　清空保存表示否掉这个读数",
+                color = Steel,
+                fontSize = 11.sp,
+                lineHeight = 17.sp
+            )
+
+            Spacer(Modifier.height(12.dp))
+            BasicTextField(
+                value = text,
+                onValueChange = { text = it },
+                textStyle = TextStyle(color = Color.White, fontSize = 15.sp, lineHeight = 22.sp),
+                cursorBrush = SolidColor(Amber),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Ink)
+                    .padding(horizontal = 12.dp, vertical = 12.dp)
+            )
+
+            Spacer(Modifier.height(14.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "保存",
+                    color = Ink,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Amber)
+                        .clickable { onSave(text.trim()) }
+                        .padding(vertical = 11.dp)
+                )
+                Text(
+                    "取消",
+                    color = Steel,
+                    fontSize = 14.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(6.dp))
+                        .border(1.dp, Steel, RoundedCornerShape(6.dp))
+                        .clickable(onClick = onCancel)
+                        .padding(vertical = 11.dp)
+                )
+            }
+        }
+    }
 }

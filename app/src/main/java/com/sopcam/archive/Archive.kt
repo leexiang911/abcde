@@ -106,6 +106,7 @@ object Archive {
                 .put("platformName", meta.platformName)
                 .put("faultType", meta.faultType)
                 .put("stepOrder", meta.stepOrder)
+                .put("stepId", meta.stepId)
                 .put("stepName", meta.stepName)
                 .put("stepRefDes", meta.stepRefDes)
                 .put("stepPoint", meta.stepPoint)
@@ -429,6 +430,31 @@ object Archive {
      * 只动 aiText / aiState 两个键，其余原样保留 —— 随行 json 里还存着
      * 重烧水印要用的全套信息，整份覆盖会把它们清掉。
      */
+    /** 一个项目里各分组已经跑出来的 AI 结论，key 是组 id */
+    fun groupAi(serialNo: String): Map<String, String> = runCatching {
+        val f = File(projectDir(serialNo), "project.json")
+        if (!f.exists()) return emptyMap()
+        val o = JSONObject(f.readText()).optJSONObject("groupAi") ?: return emptyMap()
+        o.keys().asSequence().associateWith { o.optString(it) }
+    }.getOrDefault(emptyMap())
+
+    /**
+     * 存一个分组的 AI 结论。
+     *
+     * 放 project.json 而不是某张照片的随行 json —— 分组结论不属于任何一张图，
+     * 塞进成员里的哪一张都是错的，而且那张被删掉结论就跟着没了。
+     */
+    fun setGroupAi(serialNo: String, groupId: String, text: String) {
+        runCatching {
+            val f = File(projectDir(serialNo), "project.json")
+            f.parentFile?.mkdirs()
+            val o = if (f.exists()) JSONObject(f.readText())
+                    else JSONObject().put("serialNo", serialNo)
+            val m = o.optJSONObject("groupAi") ?: JSONObject()
+            f.writeText(o.put("groupAi", m.put(groupId, text)).toString())
+        }
+    }
+
     fun setAiResult(raw: File, text: String, state: String): Boolean = runCatching {
         val f = File(raw.parentFile, raw.nameWithoutExtension + ".json")
         if (!f.exists()) return false

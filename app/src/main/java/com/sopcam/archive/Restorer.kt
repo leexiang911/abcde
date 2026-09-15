@@ -139,6 +139,7 @@ object Restorer {
             platformName = side.optString("platformName"),
             faultType = side.optString("faultType"),
             stepOrder = side.optInt("stepOrder", 0),
+            stepId = side.optString("stepId"),
             stepName = side.optString("stepName"),
             stepRefDes = side.optString("stepRefDes"),
             codeValue = side.optString("codeValue"),
