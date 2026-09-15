@@ -25,6 +25,15 @@ import java.util.Locale
 data class SopStep(
     val order: Int,
     val name: String,
+    /**
+     * 流程配置里的测试项 ID（vd_up_u 这种），流程内唯一。
+     *
+     * 提示词里的 ${'$'}{vd_up_u.ai} 按它取值。配置一直在发这个字段，
+     * 只是以前 App 没接住 —— 报表按序号归行，用不上 id。
+     * 分组提示词和组装值要按 id 引用，就必须存下来了。
+     * 本地手建的流程没有 id，留空，取值时退回按序号 + 名字反查。
+     */
+    val id: String = "",
     val refDes: String = "",
     val shots: Int = 1,
     /** 测点名，例如 "上桥U"。同一检查项下的每个测点各占一个步骤 */
@@ -62,6 +71,7 @@ data class SopStep(
     fun toJson(): JSONObject = JSONObject()
         .put("order", order)
         .put("name", name)
+        .put("id", id)
         .put("refDes", refDes)
         .put("shots", shots)
         .put("point", point)
@@ -79,6 +89,7 @@ data class SopStep(
         fun from(o: JSONObject) = SopStep(
             order = o.optInt("order", 1),
             name = o.optString("name"),
+            id = o.optString("id"),
             refDes = o.optString("refDes"),
             shots = o.optInt("shots", 1),
             point = o.optString("point"),
