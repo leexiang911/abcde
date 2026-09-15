@@ -2,12 +2,14 @@ package com.sopcam.ui
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,9 +37,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -97,6 +102,10 @@ fun ShotViewer(
     val density = LocalDensity.current
 
     var bmp by remember(item.file.absolutePath) { mutableStateOf<Bitmap?>(null) }
+    // 双指缩放。换图或转向都归位 —— 转完还保持放大的话，
+    // 画面会跳到一个跟刚才完全对不上的地方
+    var scale by remember(item.file.absolutePath) { mutableStateOf(1f) }
+    var pan by remember(item.file.absolutePath) { mutableStateOf(Offset.Zero) }
     var tray by remember(item.file.absolutePath) { mutableStateOf(Tray.NONE) }
     var code by remember(item.file.absolutePath) { mutableStateOf(item.codeValue) }
     var scanning by remember(item.file.absolutePath) { mutableStateOf(false) }
@@ -124,6 +133,9 @@ fun ShotViewer(
 
     var anchor by remember(item.file.absolutePath) { mutableStateOf(savedAnchor) }
     var rotation by remember(item.file.absolutePath) { mutableStateOf(savedRotation) }
+
+    // 转向后缩放归位：转完还保持放大的话，画面会停在一个跟刚才完全对不上的地方
+    LaunchedEffect(rotation) { scale = 1f; pan = Offset.Zero }
     var showMark by remember(item.file.absolutePath) {
         mutableStateOf(headline != null || lines.isNotEmpty())
     }
@@ -142,7 +154,31 @@ fun ShotViewer(
             Modifier
                 .fillMaxSize()
                 .padding(top = 96.dp, bottom = 150.dp)
-                .onSizeChanged { stage = it },
+                .onSizeChanged { stage = it }
+                .pointerInput(item.file.absolutePath) {
+                    detectTransformGestures { _, drag, zoom, _ ->
+                        val next = (scale * zoom).coerceIn(1f, 6f)
+                        // 原尺寸时不让拖 —— 否则轻轻一划整张图就跑偏，
+                        // 而且没放大时也没有内容可看
+                        val moved = if (next <= 1f) Offset.Zero else pan + drag
+                        // 把平移夹在「放大后多出来的那半圈」以内，拖不出画面
+                        val maxX = (stage.width * (next - 1f)) / 2f
+                        val maxY = (stage.height * (next - 1f)) / 2f
+                        scale = next
+                        pan = Offset(
+                            moved.x.coerceIn(-maxX, maxX),
+                            moved.y.coerceIn(-maxY, maxY)
+                        )
+                    }
+                }
+                .pointerInput(item.file.absolutePath) {
+                    detectTapGestures(
+                        // 双击在「铺满」和「放大 2.5 倍」之间来回，省得捏半天
+                        onDoubleTap = {
+                            if (scale > 1f) { scale = 1f; pan = Offset.Zero } else scale = 2.5f
+                        }
+                    )
+                },
             contentAlignment = Alignment.Center
         ) {
             val b = bmp
@@ -155,26 +191,40 @@ fun ShotViewer(
                 val vh = if (turned) b.width else b.height
                 val rect = fittedRect(stage, vw, vh)
 
-                Image(
-                    bitmap = b.asImageBitmap(),
-                    contentDescription = null,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier
-                        .then(
-                            if (rect != null) Modifier
-                                .size(
-                                    with(density) { rect.width.toDp() },
-                                    with(density) { rect.height.toDp() }
-                                )
-                            else Modifier.fillMaxSize()
-                        )
-                        .rotate(rotation.toFloat())
-                )
+                // 缩放和平移加在外面这一层：图和水印要一起变，
+                // 分别缩放的话放大后水印就飘到别处去了
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            scaleX = scale
+                            scaleY = scale
+                            translationX = pan.x
+                            translationY = pan.y
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Image(
+                        bitmap = b.asImageBitmap(),
+                        contentDescription = null,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .then(
+                                if (rect != null) Modifier
+                                    .size(
+                                        with(density) { rect.width.toDp() },
+                                        with(density) { rect.height.toDp() }
+                                    )
+                                else Modifier.fillMaxSize()
+                            )
+                            .rotate(rotation.toFloat())
+                    )
 
-                // 水印锚在【图片的实际绘制矩形】上，不是容器上 ——
-                // Fit 四周有留白，锚在容器上预览位置就会跟成片对不上
-                if (showMark && rect != null && (headline != null || lines.isNotEmpty())) {
-                    WatermarkGhost(rect, anchor, headline, lines)
+                    // 水印锚在【图片的实际绘制矩形】上，不是容器上 ——
+                    // Fit 四周有留白，锚在容器上预览位置就会跟成片对不上
+                    if (showMark && rect != null && (headline != null || lines.isNotEmpty())) {
+                        WatermarkGhost(rect, anchor, headline, lines)
+                    }
                 }
             }
         }
@@ -222,6 +272,24 @@ fun ShotViewer(
                         .padding(horizontal = 10.dp, vertical = 6.dp)
                 )
             }
+            // 拍照当时写的备注。点一下复制 —— 常常是要抄进检修单的那句话
+            if (item.note.isNotBlank()) {
+                Spacer(Modifier.height(7.dp))
+                Text(
+                    item.note,
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    lineHeight = 18.sp,
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color(0x22FFFFFF))
+                        .clickable { copyToClipboard(ctx, item.note) }
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                )
+            }
+
             // AI 读出来的值。点一下复制（只复制值本身，不带「AI」前缀 ——
             // 这个数是要抄进系统的），长按改。读错了就地改掉，
             // 组装值和组级提示词都按改后的值取数

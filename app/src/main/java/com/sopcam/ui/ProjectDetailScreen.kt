@@ -81,6 +81,8 @@ data class ShotItem(
     val aiText: String = "",
     /** 空=没任务 pending=排队中 ok=已出值 rejected=人工否掉 */
     val aiState: String = "",
+    /** 拍照当时写的备注 */
+    val note: String = "",
 )
 
 fun readShots(serialNo: String): List<ShotItem> = Archive.shots(serialNo).map { f ->
@@ -93,6 +95,7 @@ fun readShots(serialNo: String): List<ShotItem> = Archive.shots(serialNo).map { 
         codeValue = side?.optString("codeValue") ?: "",
         aiText = side?.optString("aiText") ?: "",
         aiState = side?.optString("aiState") ?: "",
+        note = side?.optString("note") ?: "",
     )
 }
 
