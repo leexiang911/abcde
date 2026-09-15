@@ -8,8 +8,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -156,19 +159,30 @@ fun ShotViewer(
                 .padding(top = 96.dp, bottom = 150.dp)
                 .onSizeChanged { stage = it }
                 .pointerInput(item.file.absolutePath) {
-                    detectTransformGestures { _, drag, zoom, _ ->
-                        val next = (scale * zoom).coerceIn(1f, 6f)
-                        // 原尺寸时不让拖 —— 否则轻轻一划整张图就跑偏，
-                        // 而且没放大时也没有内容可看
-                        val moved = if (next <= 1f) Offset.Zero else pan + drag
-                        // 把平移夹在「放大后多出来的那半圈」以内，拖不出画面
-                        val maxX = (stage.width * (next - 1f)) / 2f
-                        val maxY = (stage.height * (next - 1f)) / 2f
-                        scale = next
-                        pan = Offset(
-                            moved.x.coerceIn(-maxX, maxX),
-                            moved.y.coerceIn(-maxY, maxY)
-                        )
+                    // 手写手势而不用 detectTransformGestures：那个会把所有指针事件
+                    // 一律消费掉，外层翻页的 HorizontalPager 就再也收不到横划了。
+                    // 这里只在「两指」或者「已经放大」时才接管并消费，
+                    // 单指 + 原尺寸原样放过去，翻页照常。
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false)
+                        do {
+                            val e = awaitPointerEvent()
+                            val multi = e.changes.count { it.pressed } > 1
+                            if (multi || scale > 1f) {
+                                val next = (scale * e.calculateZoom()).coerceIn(1f, 6f)
+                                val moved =
+                                    if (next <= 1f) Offset.Zero else pan + e.calculatePan()
+                                // 平移夹在「放大后多出来的那半圈」以内，拖不出画面
+                                val maxX = (stage.width * (next - 1f)) / 2f
+                                val maxY = (stage.height * (next - 1f)) / 2f
+                                scale = next
+                                pan = Offset(
+                                    moved.x.coerceIn(-maxX, maxX),
+                                    moved.y.coerceIn(-maxY, maxY)
+                                )
+                                e.changes.forEach { it.consume() }
+                            }
+                        } while (e.changes.any { it.pressed })
                     }
                 }
                 .pointerInput(item.file.absolutePath) {

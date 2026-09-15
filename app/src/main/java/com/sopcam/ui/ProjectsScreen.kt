@@ -19,10 +19,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -69,6 +71,16 @@ fun ProjectsScreen(
     onDelete: (DeleteScope) -> Unit,
     exportSettings: ExportSettings,
     onExportSettings: (ExportSettings) -> Unit,
+    /**
+     * 上次滚到哪儿。
+     *
+     * 进详情页时这个页面整个退出组合，LazyColumn 自己记的位置跟着销毁，
+     * 返回就弹回顶部 —— 你刚点开的那一项看起来像「跑到下面去了」。
+     * 所以位置要托管到外面。
+     */
+    scrollIndex: Int,
+    scrollOffset: Int,
+    onScrolled: (Int, Int) -> Unit,
     onBack: () -> Unit,
 ) {
     val selecting = selected.isNotEmpty()
@@ -152,7 +164,7 @@ fun ProjectsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
-                        Text("检修项目", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                        Text("项目", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(3.dp))
                         Text(
                             if (shown.size != all.size) "筛出 ${shown.size} / ${all.size} 个"
@@ -209,7 +221,21 @@ fun ProjectsScreen(
                         .padding(16.dp)
                 )
             } else {
-                LazyColumn(Modifier.weight(1f).padding(horizontal = 20.dp)) {
+                val listState = rememberLazyListState(scrollIndex, scrollOffset)
+                // 离开这一页时把位置交出去，返回时接着用
+                DisposableEffect(Unit) {
+                    onDispose {
+                        onScrolled(
+                            listState.firstVisibleItemIndex,
+                            listState.firstVisibleItemScrollOffset
+                        )
+                    }
+                }
+
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.weight(1f).padding(horizontal = 20.dp)
+                ) {
                     items(shown, key = { it.serialNo }) { p ->
                         ProjectRow(
                             p = p,

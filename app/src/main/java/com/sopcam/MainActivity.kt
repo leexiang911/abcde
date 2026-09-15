@@ -181,6 +181,10 @@ class MainActivity : ComponentActivity() {
     // busy = 正在忙，按钮要禁用；note = 干完的提示，几秒后自己消失，不禁用任何东西。
     // 以前两者共用一个字段，完成提示写进去就没人清了，按钮从此点不动 ——
     // 得退出重进才恢复。
+    // 项目列表滚到哪儿了。ProjectsScreen 进详情页时整个退出组合，
+    // 位置记在它自己身上会跟着销毁，返回就弹回顶部
+    private var projectsScrollIndex = 0
+    private var projectsScrollOffset = 0
     private var detailBusy by mutableStateOf<String?>(null)
     private var detailNote by mutableStateOf<String?>(null)
     /** AI 跑批的进度文案，null 表示没在跑 */
@@ -487,6 +491,12 @@ class MainActivity : ComponentActivity() {
                         openProject = p
                         openShots = readShots(p.serialNo)
                         screen = Screen.PROJECT_DETAIL
+                    },
+                    scrollIndex = projectsScrollIndex,
+                    scrollOffset = projectsScrollOffset,
+                    onScrolled = { i, off ->
+                        projectsScrollIndex = i
+                        projectsScrollOffset = off
                     },
                     onExport = ::runExport,
                     onDelete = ::runBulkDelete,
