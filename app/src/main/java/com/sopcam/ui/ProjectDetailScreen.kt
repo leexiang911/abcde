@@ -83,10 +83,19 @@ data class ShotItem(
     val aiState: String = "",
     /** 拍照当时写的备注 */
     val note: String = "",
+    /**
+     * 原图和随行 json 里较晚的那个修改时间。
+     *
+     * 存在的唯一理由是给 Compose 当 remember 的 key：改水印、转图、改 AI 读数
+     * 都不换文件名，只按路径记忆的话，数据早就重新读出来了，界面却还拿着旧的那份 ——
+     * 表现为「退出再进才刷新」。文件一动这个数就变，界面跟着重算。
+     */
+    val stamp: Long = 0L,
 )
 
 fun readShots(serialNo: String): List<ShotItem> = Archive.shots(serialNo).map { f ->
     val side = Archive.sidecar(f)
+    val sideFile = File(f.parentFile, f.nameWithoutExtension + ".json")
     ShotItem(
         file = f,
         stepOrder = side?.optInt("stepOrder", 0) ?: 0,
@@ -96,6 +105,8 @@ fun readShots(serialNo: String): List<ShotItem> = Archive.shots(serialNo).map { 
         aiText = side?.optString("aiText") ?: "",
         aiState = side?.optString("aiState") ?: "",
         note = side?.optString("note") ?: "",
+        // 转图动的是原图，改水印和 AI 读数动的是随行 json，取两者较晚的那个
+        stamp = maxOf(f.lastModified(), sideFile.lastModified()),
     )
 }
 
@@ -116,6 +127,8 @@ fun ProjectDetailScreen(
     onEditShot: (ShotItem, String, List<String>, String) -> Unit,
     onApplyEdit: (ShotItem, Anchor, Int) -> Unit,
     onRetake: (ShotItem) -> Unit,
+    /** 查看器里改了 AI 读数，外面要重读一遍列表 */
+    onAiEdited: () -> Unit,
     /** 正在跑批时的进度文案，null 表示没在跑 */
     aiProgress: String?,
     onRunAi: () -> Unit,
@@ -325,6 +338,7 @@ fun ProjectDetailScreen(
                         onDeleteShot(item)
                         if (shots.size <= 1) viewingAt = null
                     },
+                    onAiEdited = onAiEdited,
                     onClose = { viewingAt = null }
                 )
             }
@@ -490,10 +504,14 @@ private fun ThumbCell(
     onTap: () -> Unit,
     onLongPress: () -> Unit,
 ) {
-    var bmp by remember(item.file.absolutePath) { mutableStateOf<Bitmap?>(null) }
+    // key 带上 stamp：转过图之后文件名没变，只按路径记的话这里还是旧缩略图
+    val key = remember(item.file.absolutePath, item.stamp) {
+        item.file.absolutePath + "@" + item.stamp
+    }
+    var bmp by remember(key) { mutableStateOf<Bitmap?>(null) }
 
     // 解码放到 IO 线程，几十张一起解会把主线程卡死
-    LaunchedEffect(item.file.absolutePath) {
+    LaunchedEffect(key) {
         bmp = withContext(Dispatchers.IO) { Thumbs.of(item.file) }
     }
 
@@ -950,6 +968,7 @@ private fun ShotPager(
     onRetake: (ShotItem) -> Unit,
     onEditText: (ShotItem) -> Unit,
     onDelete: (ShotItem) -> Unit,
+    onAiEdited: () -> Unit,
     onClose: () -> Unit,
 ) {
     val pager = rememberPagerState(
@@ -968,6 +987,7 @@ private fun ShotPager(
                     onRetake = { onRetake(item) },
                     onEditText = { onEditText(item) },
                     onDelete = { onDelete(item) },
+                    onAiEdited = onAiEdited,
                     onClose = onClose
                 )
             }

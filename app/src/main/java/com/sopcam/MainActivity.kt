@@ -612,6 +612,7 @@ class MainActivity : ComponentActivity() {
                             Archive.updateSidecarWatermark(item.file, headline, lines, name)
                             openShots = readShots(p.serialNo)
                         },
+                        onAiEdited = { openShots = readShots(p.serialNo) },
                         aiProgress = aiProgress,
                         onRunAi = { runAi(p.serialNo) },
                         onStopAi = { aiJob?.cancel() },

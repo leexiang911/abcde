@@ -98,31 +98,45 @@ fun ShotViewer(
     onRetake: () -> Unit,
     onEditText: () -> Unit,
     onDelete: () -> Unit,
+    /** 改完 AI 读数要通知外面重读一遍，否则缩略图上的 AI 角标不跟着变 */
+    onAiEdited: () -> Unit,
     onClose: () -> Unit,
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
 
-    var bmp by remember(item.file.absolutePath) { mutableStateOf<Bitmap?>(null) }
+    /*
+     * 所有本地状态都挂在这个 key 上，而不是单看文件路径。
+     *
+     * 改水印、转图、改 AI 读数都不换文件名：只按路径记的话，外面 readShots()
+     * 明明已经把新数据读出来了，这里的 remember 却一个都不重算 ——
+     * side 还是旧的 JSONObject，savedRotation 还是旧角度，bmp 还是旧位图。
+     * 表现就是「退出再进去才看到改动」。stamp 跟着文件的修改时间走，一动就重算。
+     */
+    val key = remember(item.file.absolutePath, item.stamp) {
+        item.file.absolutePath + "@" + item.stamp
+    }
+
+    var bmp by remember(key) { mutableStateOf<Bitmap?>(null) }
     // 双指缩放。换图或转向都归位 —— 转完还保持放大的话，
     // 画面会跳到一个跟刚才完全对不上的地方
-    var scale by remember(item.file.absolutePath) { mutableStateOf(1f) }
-    var pan by remember(item.file.absolutePath) { mutableStateOf(Offset.Zero) }
-    var tray by remember(item.file.absolutePath) { mutableStateOf(Tray.NONE) }
-    var code by remember(item.file.absolutePath) { mutableStateOf(item.codeValue) }
-    var scanning by remember(item.file.absolutePath) { mutableStateOf(false) }
-    var offerCrop by remember(item.file.absolutePath) { mutableStateOf(false) }
-    var cropping by remember(item.file.absolutePath) { mutableStateOf(false) }
-    var cropNote by remember(item.file.absolutePath) { mutableStateOf<String?>(null) }
-    var confirmDelete by remember(item.file.absolutePath) { mutableStateOf(false) }
+    var scale by remember(key) { mutableStateOf(1f) }
+    var pan by remember(key) { mutableStateOf(Offset.Zero) }
+    var tray by remember(key) { mutableStateOf(Tray.NONE) }
+    var code by remember(key) { mutableStateOf(item.codeValue) }
+    var scanning by remember(key) { mutableStateOf(false) }
+    var offerCrop by remember(key) { mutableStateOf(false) }
+    var cropping by remember(key) { mutableStateOf(false) }
+    var cropNote by remember(key) { mutableStateOf<String?>(null) }
+    var confirmDelete by remember(key) { mutableStateOf(false) }
     // AI 读错了要能当场改：组装值和组级提示词都按这个值取数，
     // 一个错值会顺着占位符污染整组的结论
-    var aiText by remember(item.file.absolutePath) { mutableStateOf(item.aiText) }
-    var editingAi by remember(item.file.absolutePath) { mutableStateOf(false) }
+    var aiText by remember(key) { mutableStateOf(item.aiText) }
+    var editingAi by remember(key) { mutableStateOf(false) }
 
     // 水印内容从随行 json 读，预览要跟成片一致
-    val side = remember(item.file.absolutePath) { Archive.sidecar(item.file) }
+    val side = remember(key) { Archive.sidecar(item.file) }
     val headline = remember(side) { side?.optString("headline")?.takeIf { it.isNotBlank() } }
     val lines = remember(side) {
         side?.optJSONArray("lines")?.let { arr -> (0 until arr.length()).map { arr.optString(it) } }
@@ -134,17 +148,17 @@ fun ShotViewer(
     }
     val savedRotation = remember(side) { side?.optInt("rotation", 0) ?: 0 }
 
-    var anchor by remember(item.file.absolutePath) { mutableStateOf(savedAnchor) }
-    var rotation by remember(item.file.absolutePath) { mutableStateOf(savedRotation) }
+    var anchor by remember(key) { mutableStateOf(savedAnchor) }
+    var rotation by remember(key) { mutableStateOf(savedRotation) }
 
     // 转向后缩放归位：转完还保持放大的话，画面会停在一个跟刚才完全对不上的地方
     LaunchedEffect(rotation) { scale = 1f; pan = Offset.Zero }
-    var showMark by remember(item.file.absolutePath) {
+    var showMark by remember(key) {
         mutableStateOf(headline != null || lines.isNotEmpty())
     }
     val dirty = anchor != savedAnchor || rotation != savedRotation
 
-    LaunchedEffect(item.file.absolutePath) {
+    LaunchedEffect(key) {
         bmp = withContext(Dispatchers.IO) { Thumbs.full(item.file) }
     }
 
@@ -158,7 +172,7 @@ fun ShotViewer(
                 .fillMaxSize()
                 .padding(top = 96.dp, bottom = 150.dp)
                 .onSizeChanged { stage = it }
-                .pointerInput(item.file.absolutePath) {
+                .pointerInput(key) {
                     // 手写手势而不用 detectTransformGestures：那个会把所有指针事件
                     // 一律消费掉，外层翻页的 HorizontalPager 就再也收不到横划了。
                     // 这里只在「两指」或者「已经放大」时才接管并消费，
@@ -185,7 +199,7 @@ fun ShotViewer(
                         } while (e.changes.any { it.pressed })
                     }
                 }
-                .pointerInput(item.file.absolutePath) {
+                .pointerInput(key) {
                     detectTapGestures(
                         // 双击在「铺满」和「放大 2.5 倍」之间来回，省得捏半天
                         onDoubleTap = {
@@ -473,6 +487,7 @@ fun ShotViewer(
                     scope.launch(Dispatchers.IO) {
                         // 人改过的标 ok，不是 pending —— 否则下次跑批又把它覆盖回去
                         Archive.setAiResult(item.file, v, if (v.isBlank()) "rejected" else "ok")
+                        withContext(Dispatchers.Main) { onAiEdited() }
                     }
                 }
             )

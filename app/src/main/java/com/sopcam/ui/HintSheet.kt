@@ -59,7 +59,10 @@ fun HintSheet(hint: Hint, onClose: () -> Unit) {
                 Modifier
                     .fillMaxWidth()
                     .background(Panel)
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                    // 顶上多留一截给状态栏。跟项目里其他整屏页面（相机、项目列表）
+                    // 一样用固定值，不引 WindowInsets —— 那套要改 Activity 的
+                    // edge-to-edge 设置，为一个浮层不值当
+                    .padding(start = 16.dp, end = 16.dp, top = 46.dp, bottom = 14.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -147,7 +150,7 @@ private fun HintCard(item: HintItem) {
 
         if (item.text.isNotBlank()) {
             Spacer(Modifier.height(8.dp))
-            Text(item.text, color = Color.White, fontSize = 13.sp, lineHeight = 20.sp)
+            MarkdownText(item.text)
         }
     }
 }
