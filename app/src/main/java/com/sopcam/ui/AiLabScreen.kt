@@ -45,6 +45,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sopcam.ai.LiteRt
+import com.sopcam.ai.Ocr
 import com.sopcam.archive.Archive
 import com.sopcam.archive.Thumbs
 import java.io.File
@@ -297,6 +298,34 @@ fun AiLabScreen(
                     busy = null
                     r.onSuccess { append("✓ 读图 ${it.millis} ms · ${f.name}\n${it.text}") }
                         .onFailure { append("✗ 读图失败 ${it.javaClass.simpleName}: ${it.message}") }
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
+            Section("测试三 · OCR 对比")
+            Hint(
+                "同一张图交给 ML Kit 文字识别。它不缩图，吃的是原始分辨率 —— " +
+                    "铭牌、丝印这类印刷体小字应该明显更准，而且快上百倍。\n" +
+                    "但七段数码管的笔画是断的，可能整块都框不出来，那种还得靠大模型。\n" +
+                    "不用加载模型，也不看上面那个提示词。"
+            )
+
+            Big("用 OCR 读一遍", enabled = shot != null && busy == null) {
+                val f = shot ?: return@Big
+                busy = "OCR 中…"
+                scope.launch {
+                    val r = Ocr.read(f.absolutePath)
+                    busy = null
+                    r.onSuccess {
+                        append(
+                            if (it.lines.isEmpty())
+                                "○ OCR ${it.millis} ms · ${f.name}\n一个字都没认出来"
+                            else
+                                "✓ OCR ${it.millis} ms · ${f.name} · ${it.lines.size} 行\n${it.text}"
+                        )
+                    }.onFailure {
+                        append("✗ OCR 失败 ${it.javaClass.simpleName}: ${it.message}")
+                    }
                 }
             }
         }

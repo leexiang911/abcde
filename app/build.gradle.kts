@@ -51,6 +51,10 @@ dependencies {
 
     // 内置模型：不依赖 Play Services，车间断网也能扫。代价是 APK 大 2–3MB
     implementation("com.google.mlkit:barcode-scanning:17.3.0")
+    // 印刷体文字识别。只装拉丁文字包 —— 要读的全是字母数字（型号、序列号、
+    // 万用表读数），一个中文都没有，中文包要大一个数量级。
+    // 它不像大模型那样先把图压到 896，能吃原始分辨率，小字反而是它的主场
+    implementation("com.google.mlkit:text-recognition:16.0.1")
     // 纯 Java，无 NDK。选它是因为它允许自定义 LuminanceSource ——
     // ML Kit 只收 Bitmap，内部怎么转灰度控制不了
     implementation("com.google.zxing:core:3.5.3")
