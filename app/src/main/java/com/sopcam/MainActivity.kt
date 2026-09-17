@@ -54,6 +54,7 @@ import com.sopcam.meta.ImageMeta
 import com.sopcam.meta.PendingCleaner
 import com.sopcam.sop.AppSettings
 import com.sopcam.sop.Catalog
+import com.sopcam.sop.CodeParse
 import com.sopcam.sop.ConfigSync
 import com.sopcam.sop.ControllerModel
 import com.sopcam.sop.FaultType
@@ -613,6 +614,18 @@ class MainActivity : ComponentActivity() {
                             openShots = readShots(p.serialNo)
                         },
                         onAiEdited = { openShots = readShots(p.serialNo) },
+                        codeEditable = { item -> stepOf(item)?.let { st ->
+                            st.needsScan || st.parse.isNotEmpty()
+                        } ?: false },
+                        onTypeCode = { item, raw ->
+                            // 手填的走跟扫码同一条路：先按这一项的规则切，切不出来就存整串。
+                            // 格式标 MANUAL，报表和查看器能看出这个值是人填的
+                            val rules = stepOf(item)?.parse.orEmpty()
+                            val cut = CodeParse.apply(raw, rules) ?: raw
+                            Archive.updateSidecarCode(item.file, cut, "MANUAL", codeRaw = raw)
+                            openShots = readShots(p.serialNo)
+                            showNote(if (cut == raw) "已填入" else "已填入并切出：$cut")
+                        },
                         aiProgress = aiProgress,
                         onRunAi = { runAi(p.serialNo) },
                         onStopAi = { aiJob?.cancel() },
@@ -789,9 +802,11 @@ class MainActivity : ComponentActivity() {
         if (serials.isEmpty() || !opt.any) return
         exporting = "准备中…"
         lifecycleScope.launch(Dispatchers.IO) {
-            // 报表要按流程里配的规则自动判定，所以把当前流程一起交出去
-            val tpl = templates.firstOrNull { it.id == templateId }
-            val zip = Exporter.export(serials, opt, exportSettings, tpl) { done, total ->
+            // 把**全部**流程交出去，不是当前选中的那份 —— 一次可能导出好几个项目，
+            // 各自跑的流程不一样；项目档案里也没存当时用的是哪份。
+            // 只传一份的话，导出别的流程的项目时查不到组名，报表上就只剩 id
+            val all = templates.toList()
+            val zip = Exporter.export(serials, opt, exportSettings, all) { done, total ->
                 lifecycleScope.launch(Dispatchers.Main) { exporting = "打包中 $done / $total" }
             }
             withContext(Dispatchers.Main) {
@@ -1034,8 +1049,8 @@ class MainActivity : ComponentActivity() {
                 serialNo = serialNo,
                 modelPath = settings.aiModelPath,
                 deviceName = settings.aiDevice,
-                // 分组提示词和组装值都在流程配置里，不传模板就只能跑单张
-                template = templates.firstOrNull { it.id == templateId },
+                // 同样传全部：这个项目当时可能用的是别的流程
+                templates = templates.toList(),
             ) { done, total, last ->
                 lifecycleScope.launch(Dispatchers.Main) {
                     aiProgress = "$done / $total  ·  $last"
@@ -1073,6 +1088,18 @@ class MainActivity : ComponentActivity() {
         openProject = null
         detailBusy = null
         screen = Screen.PROJECTS
+    }
+
+    /**
+     * 这张照片对应流程里的哪一项。
+     *
+     * 按随行 json 里的 stepId 在**所有**流程里找 —— 这个项目当时跑的可能不是
+     * 当前选中的那份流程。老照片没有 stepId，就认了，返回 null。
+     */
+    private fun stepOf(item: ShotItem): SopStep? {
+        val id = Archive.sidecar(item.file)?.optString("stepId").orEmpty()
+        if (id.isBlank()) return null
+        return templates.flatMap { it.steps }.firstOrNull { it.id == id }
     }
 
     /** 提示只是提示，2.5 秒后自动收走，不该挡住任何操作 */
@@ -1386,6 +1413,7 @@ class MainActivity : ComponentActivity() {
                 scanKind = step?.scan ?: if (settings.scanFreeShots) "common" else "none",
                 // 全套级联只留给配置里点名要扫的步骤
                 scanThorough = step != null && step.scan.isNotBlank() && step.scan != "none",
+                parse = step?.parse.orEmpty(),
             )
         }
 

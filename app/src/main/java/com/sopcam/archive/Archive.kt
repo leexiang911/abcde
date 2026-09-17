@@ -114,6 +114,7 @@ object Archive {
                 .put("note", meta.note)
                 .put("codeValue", meta.codeValue)
                 .put("codeFormat", meta.codeFormat)
+                .put("codeRaw", meta.codeRaw)
                 .put("aiPrompt", meta.aiPrompt)
                 .put("aiText", meta.aiText)
                 .put("aiState", meta.aiState)
@@ -311,13 +312,20 @@ object Archive {
     }
 
     /** 事后补扫出来的码值，写回随行 json。恢复水印时就能带上它 */
-    fun updateSidecarCode(raw: File, value: String, format: String): Boolean {
+    fun updateSidecarCode(
+        raw: File,
+        value: String,
+        format: String,
+        /** 切之前的整串。null 表示不动原来存的那份 */
+        codeRaw: String? = null,
+    ): Boolean {
         val f = File(raw.parentFile, raw.nameWithoutExtension + ".json")
         if (!f.exists()) return false
         return runCatching {
             val o = JSONObject(f.readText())
                 .put("codeValue", value)
                 .put("codeFormat", format)
+            if (codeRaw != null) o.put("codeRaw", codeRaw)
             f.writeText(o.toString())
             true
         }.getOrDefault(false)

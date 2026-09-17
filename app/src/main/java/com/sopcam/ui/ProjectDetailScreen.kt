@@ -77,6 +77,8 @@ data class ShotItem(
     val stepName: String,
     val at: Long,
     val codeValue: String = "",
+    /** 切之前的整串。手填时拿它当初值，好在原串上改 */
+    val codeRaw: String = "",
     /** AI 读出来的值。空 = 还没跑或者没跑出来 */
     val aiText: String = "",
     /** 空=没任务 pending=排队中 ok=已出值 rejected=人工否掉 */
@@ -102,6 +104,7 @@ fun readShots(serialNo: String): List<ShotItem> = Archive.shots(serialNo).map { 
         stepName = side?.optString("stepName") ?: "",
         at = side?.optLong("capturedAt", f.lastModified()) ?: f.lastModified(),
         codeValue = side?.optString("codeValue") ?: "",
+        codeRaw = side?.optString("codeRaw") ?: "",
         aiText = side?.optString("aiText") ?: "",
         aiState = side?.optString("aiState") ?: "",
         note = side?.optString("note") ?: "",
@@ -129,6 +132,10 @@ fun ProjectDetailScreen(
     onRetake: (ShotItem) -> Unit,
     /** 查看器里改了 AI 读数，外面要重读一遍列表 */
     onAiEdited: () -> Unit,
+    /** 这张图对应的测试项配了扫码或切码规则吗 */
+    codeEditable: (ShotItem) -> Boolean,
+    /** 手填的整串码值 */
+    onTypeCode: (ShotItem, String) -> Unit,
     /** 正在跑批时的进度文案，null 表示没在跑 */
     aiProgress: String?,
     onRunAi: () -> Unit,
@@ -339,6 +346,8 @@ fun ProjectDetailScreen(
                         if (shots.size <= 1) viewingAt = null
                     },
                     onAiEdited = onAiEdited,
+                    codeEditable = codeEditable,
+                    onTypeCode = onTypeCode,
                     onClose = { viewingAt = null }
                 )
             }
@@ -430,6 +439,9 @@ private fun AiBar(
     onStop: () -> Unit,
 ) {
     if (pending == 0 && readCount == 0 && progress == null) return
+    // 全跑完之后按钮也得留着：改过某张的读数，分组结论和组装值就都过期了，
+    // 得能再跑一次重算。原来只在 pending > 0 时显示，改完值反而点不了
+    val canRun = progress == null
 
     Column(
         Modifier
@@ -457,7 +469,13 @@ private fun AiBar(
                 )
                 if (readCount > 0) {
                     Spacer(Modifier.height(3.dp))
-                    Text("已出值 $readCount 张，点开图片看内容", color = Steel, fontSize = 11.sp)
+                    Text(
+                        if (pending > 0) "已出值 $readCount 张，点开图片看内容"
+                        else "已出值 $readCount 张 · 改过读数就重算一次分组",
+                        color = Steel,
+                        fontSize = 11.sp,
+                        lineHeight = 16.sp
+                    )
                 }
             }
             if (progress != null) {
@@ -471,15 +489,18 @@ private fun AiBar(
                         .clickable(onClick = onStop)
                         .padding(horizontal = 14.dp, vertical = 8.dp)
                 )
-            } else if (pending > 0) {
+            } else if (canRun) {
                 Text(
-                    "开始",
-                    color = Ink,
+                    if (pending > 0) "开始" else "重算分组",
+                    color = if (pending > 0) Ink else Amber,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier
                         .clip(RoundedCornerShape(4.dp))
-                        .background(Amber)
+                        .then(
+                            if (pending > 0) Modifier.background(Amber)
+                            else Modifier.border(1.dp, Amber, RoundedCornerShape(4.dp))
+                        )
                         .clickable(onClick = onRun)
                         .padding(horizontal = 16.dp, vertical = 8.dp)
                 )
@@ -969,6 +990,8 @@ private fun ShotPager(
     onEditText: (ShotItem) -> Unit,
     onDelete: (ShotItem) -> Unit,
     onAiEdited: () -> Unit,
+    codeEditable: (ShotItem) -> Boolean,
+    onTypeCode: (ShotItem, String) -> Unit,
     onClose: () -> Unit,
 ) {
     val pager = rememberPagerState(
@@ -988,6 +1011,8 @@ private fun ShotPager(
                     onEditText = { onEditText(item) },
                     onDelete = { onDelete(item) },
                     onAiEdited = onAiEdited,
+                    codeEditable = codeEditable(item),
+                    onTypeCode = { onTypeCode(item, it) },
                     onClose = onClose
                 )
             }

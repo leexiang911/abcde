@@ -33,25 +33,27 @@ object Placeholders {
      * 老照片没有 stepId 字段（那时候还没存），退回按序号 + 名字在流程里反查。
      * 反查不到就认了：占位符填「—」，总比整条炸掉强。
      */
-    fun indexOf(serialNo: String, template: SopTemplate?): Map<String, JSONObject> {
+    fun indexOf(serialNo: String, templates: List<SopTemplate>): Map<String, JSONObject> {
         val out = LinkedHashMap<String, JSONObject>()
         Archive.shots(serialNo).forEach { raw ->
             val side = Archive.sidecar(raw) ?: return@forEach
-            val id = side.optString("stepId").ifBlank { fallbackId(side, template) }
+            val id = side.optString("stepId").ifBlank { fallbackId(side, templates) }
             if (id.isNotBlank()) out[id] = side
         }
         return out
     }
 
-    private fun fallbackId(side: JSONObject, template: SopTemplate?): String {
-        val tpl = template ?: return ""
+    private fun fallbackId(side: JSONObject, templates: List<SopTemplate>): String {
+        if (templates.isEmpty()) return ""
         val order = side.optInt("stepOrder", 0)
         val name = side.optString("stepName")
         val point = side.optString("stepPoint")
-        return tpl.steps.firstOrNull {
+        val all = templates.flatMap { it.steps }
+        // 先按序号 + 名字 + 测点精确找，找不到再放宽到只看序号
+        return all.firstOrNull {
             it.order == order && it.name == name && it.point == point
         }?.id
-            ?: tpl.steps.firstOrNull { it.order == order }?.id
+            ?: all.firstOrNull { it.order == order && it.name == name }?.id
             ?: ""
     }
 
@@ -91,11 +93,11 @@ object Placeholders {
     /** 方便直接拿一个项目的组装值，不必自己先建索引 */
     fun assemble(
         serialNo: String,
-        template: SopTemplate?,
+        templates: List<SopTemplate>,
         format: String,
         groupResults: Map<String, String> = emptyMap(),
     ): String {
         if (format.isBlank()) return ""
-        return expand(format, indexOf(serialNo, template), groupResults).first
+        return expand(format, indexOf(serialNo, templates), groupResults).first
     }
 }

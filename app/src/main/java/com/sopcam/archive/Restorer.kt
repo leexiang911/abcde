@@ -144,6 +144,7 @@ object Restorer {
             stepRefDes = side.optString("stepRefDes"),
             codeValue = side.optString("codeValue"),
             codeFormat = side.optString("codeFormat"),
+            codeRaw = side.optString("codeRaw"),
             anchor = side.optString("anchor"),
             topEdge = side.optString("topEdge"),
             hasWatermark = headline != null || lines.isNotEmpty(),

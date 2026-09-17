@@ -4,10 +4,10 @@ import android.content.Context
 import android.graphics.Bitmap
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
-import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.MeteringPoint
 import androidx.camera.core.Preview
@@ -21,10 +21,18 @@ import androidx.lifecycle.LifecycleOwner
 import com.sopcam.archive.Archive
 import com.sopcam.meta.ImageMeta
 import com.sopcam.meta.MediaWriter
+import com.sopcam.sop.CodeParse
+import com.sopcam.sop.ParseRule
 import com.sopcam.watermark.Anchor
 import com.sopcam.watermark.WatermarkContent
 import com.sopcam.watermark.WatermarkRenderer
 import com.sopcam.watermark.WatermarkStyle
+import java.io.ByteArrayOutputStream
+import java.util.concurrent.Executor
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -33,12 +41,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
-import java.io.ByteArrayOutputStream
-import java.util.concurrent.Executor
-import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicInteger
-import kotlin.coroutines.resume
-import kotlin.coroutines.suspendCoroutine
 
 /**
  * 一次待落盘的任务。快门回调只做「拿字节 + 入队」，微秒级返回，
@@ -68,6 +70,8 @@ data class PendingShot(
      * 没有码的图（整板概览、焊点特写）跑全套要把八趟全跑完才认输，纯烧电。
      */
     val scanThorough: Boolean = false,
+    /** 扫到码之后怎么切。空数组表示整串照收 */
+    val parse: List<ParseRule> = emptyList(),
     val style: WatermarkStyle = WatermarkStyle(),
 )
 
@@ -106,6 +110,19 @@ class CapturePipeline(
         }
     }
 
+    /**
+     * 按规则切码值。原始整串留在 codeRaw，切出来的顶到 codeValue。
+     *
+     * 切不出来时 codeValue 保持整串不动 —— 让人在详情页看见「扫到了但没切对」，
+     * 好过清空之后一脸茫然。regex 写错了也是这个下场，回头改规则重切就行。
+     */
+    private fun cut(meta: ImageMeta, rules: List<ParseRule>): ImageMeta {
+        if (meta.codeValue.isBlank() || rules.isEmpty()) return meta
+        val raw = meta.codeValue
+        val hit = CodeParse.apply(raw, rules)
+        return meta.copy(codeValue = hit ?: raw, codeRaw = raw)
+    }
+
     private suspend fun process(shot: PendingShot): SavedShot {
         // 一次解码 → 正立。原图和水印图共用这张位图，只是编码两次。
         val bmp = WatermarkRenderer.decodeUpright(shot.jpeg, maxLongSide)
@@ -116,13 +133,17 @@ class CapturePipeline(
         // 预览那路只有 1600x1200，板子上的 Data Matrix 模块细，经常扫不出；
         // 这张是 4000x3000，多六倍像素，成功率高得多。
         // 预览已经扫到的话就不重复跑 —— 那说明码足够清楚。
-        val meta = when {
+        val scanned = when {
             shot.scanKind == "none" -> shot.meta
             shot.meta.codeValue.isNotBlank() -> shot.meta
             else -> Codes.scan(bmp, thorough = shot.scanThorough, kind = shot.scanKind)
                 ?.let { shot.meta.copy(codeValue = it.value, codeFormat = it.format) }
                 ?: shot.meta
         }
+
+        // 切一刀：控制板的点阵码解出来是一整行，检修单上要的只是其中一段。
+        // 无论码来自预览那路还是刚才全分辨率这路，都走同一套规则
+        val meta = cut(scanned, shot.parse)
 
         // 原图进归档区，不进相册 —— 相册里只放水印照片，
         // 原图是给"以后重烧水印"用的兜底数据，混进相册只会看着乱

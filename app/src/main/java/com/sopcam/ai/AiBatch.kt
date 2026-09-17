@@ -64,12 +64,25 @@ object AiBatch {
         serialNo: String,
         modelPath: String,
         deviceName: String,
-        template: SopTemplate?,
+        templates: List<SopTemplate>,
         onProgress: (Int, Int, String) -> Unit,
     ): Outcome {
         val tasks = pending(serialNo)
-        // 分组只跑配了 prompt 的。只配 format 的组不用模型，报表那边现算
-        val groups = template?.groups.orEmpty().filter { it.prompt.isNotBlank() }
+
+        // 这个项目的照片实际归到了哪几个组。
+        //
+        // 必须按它过滤：templates 是**全部**流程（导出老项目要靠它查组名），
+        // 不筛的话会把别的流程的分组也跑一遍 —— 既白烧几十秒，
+        // 又给这个项目存下一堆它根本没有的结论。
+        val used = Archive.shots(serialNo)
+            .mapNotNull { Archive.sidecar(it)?.optString("stepGroup") }
+            .filter { it.isNotBlank() }
+            .toSet()
+
+        // 只跑配了 prompt 的。只配 format 的组不用模型，报表那边现算
+        val groups = templates.flatMap { it.groups }
+            .filter { it.prompt.isNotBlank() && it.id in used }
+            .distinctBy { it.id }
         if (tasks.isEmpty() && groups.isEmpty()) return Outcome(0, 0, false)
 
         if (!LiteRt.isReady || LiteRt.loaded?.path != modelPath) {
@@ -112,7 +125,7 @@ object AiBatch {
         for (g in groups) {
             if (!currentCoroutineContext().isActive) return Outcome(done, failed, true)
 
-            val shots = Placeholders.indexOf(serialNo, template)
+            val shots = Placeholders.indexOf(serialNo, templates)
             val (text, missing) = Placeholders.expand(g.prompt, shots, results)
             if (missing) {
                 // 成员还缺读数就跳过，不硬跑 —— 拿「—」问出来的结论是错的，

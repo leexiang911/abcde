@@ -33,11 +33,18 @@ object Report {
      * value / verdict / remark 现在是空的，报表里显示成可填的框。
      * 以后 AI 读表填的就是它们 —— 位置先留好，到时候数据结构和模板都不用改。
      */
+    /**
+     * @param templates 全部流程，不是「当前选中的那个」。
+     *   一次可能导出好几个项目，各自跑的流程不一样；而且项目档案里没存
+     *   当时用的是哪份流程 —— 只传一个的话，导出老项目时查不到组名，
+     *   报表上就只能显示 temp1、net_pins 这种 id。组 id 在各流程里是唯一的，
+     *   挨个找就行。
+     */
     fun manifest(
         serials: List<String>,
         imageExt: String,
         watermarked: Boolean,
-        template: SopTemplate? = null,
+        templates: List<SopTemplate> = emptyList(),
     ): JSONObject {
         val projects = JSONArray()
         val index = Archive.list().associateBy { it.serialNo }
@@ -46,7 +53,7 @@ object Report {
             val meta = index[sn]
             val steps = LinkedHashMap<String, JSONObject>()
             // 分组横跨哪些序号、叫什么名字，先算一遍 —— 行和文件夹都照这个来
-            val rows = rowsOf(sn, template)
+            val rows = rowsOf(sn, templates)
 
             Archive.shots(sn).forEach { raw ->
                 val side = Archive.sidecar(raw) ?: JSONObject()
@@ -126,7 +133,7 @@ object Report {
             // 把判定规则拌进去，报表页面自己算 —— 数一填完当场出正常/异常
             // 组装值现算，不存盘 —— 你在手机上改过某张的 AI 读数之后，
             // 导出的报表就该按改后的值重拼。存下来的话必然有一份是旧的
-            val shotIndex = Placeholders.indexOf(sn, template)
+            val shotIndex = Placeholders.indexOf(sn, templates)
             val groupResults = Archive.groupAi(sn)
 
             ordered.forEach { g ->
@@ -134,7 +141,7 @@ object Report {
                 if (key.startsWith(GROUP_PREFIX)) {
                     // 分组行的规则和单位取组上的。这里必须拿组 id 去查 ——
                     // 显示名已经换成中文了，用它撞 rowName() 撞不上
-                    template?.groupOf(key.removePrefix(GROUP_PREFIX))?.let { gr ->
+                    findGroup(templates, key.removePrefix(GROUP_PREFIX))?.let { gr ->
                         gr.rule?.let { g.put("groupRule", it.toJson()) }
                         if (gr.unit.isNotBlank()) g.put("unit", gr.unit)
                         if (gr.format.isNotBlank()) {
@@ -148,7 +155,7 @@ object Report {
                     }
                 } else {
                     val row = g.optString("name")
-                    template?.steps?.firstOrNull { it.rowName() == row }?.let { st ->
+                    findStep(templates, row)?.let { st ->
                         st.rule?.let { g.put("valueRule", it.toJson()) }
                         if (st.unit.isNotBlank() && g.optString("unit").isBlank()) {
                             g.put("unit", st.unit)
@@ -217,11 +224,18 @@ object Report {
      * 流程配置里的中文名。查不到（老照片、流程已删）就退回 id，
      * 至少还是个能认出来的字符串。
      */
-    private fun labelFor(key: String, template: SopTemplate?): String {
+    private fun labelFor(key: String, templates: List<SopTemplate>): String {
         if (!key.startsWith(GROUP_PREFIX)) return key.substringAfterLast('|')
         val id = key.removePrefix(GROUP_PREFIX)
-        return template?.groupOf(id)?.name?.ifBlank { id } ?: id
+        return findGroup(templates, id)?.name?.ifBlank { id } ?: id
     }
+
+    /** 在所有流程里找这个组。组 id 唯一，第一个命中的就是 */
+    private fun findGroup(templates: List<SopTemplate>, id: String) =
+        templates.firstNotNullOfOrNull { it.groupOf(id) }
+
+    private fun findStep(templates: List<SopTemplate>, rowName: String) =
+        templates.firstNotNullOfOrNull { t -> t.steps.firstOrNull { it.rowName() == rowName } }
 
     /**
      * 一个项目里，每一行归到哪个序号、叫什么名字。
@@ -230,13 +244,16 @@ object Report {
      * 所以统一取组内最小的那个序号。manifest 和 folderMap 都走这里，
      * 两边各算一遍必然对不上 —— 报表上写着 02_温度1，包里却是 07_温度1。
      */
-    private fun rowsOf(serialNo: String, template: SopTemplate?): Map<String, Pair<Int, String>> {
+    private fun rowsOf(
+        serialNo: String,
+        templates: List<SopTemplate>,
+    ): Map<String, Pair<Int, String>> {
         val out = LinkedHashMap<String, Pair<Int, String>>()
         Archive.shots(serialNo).forEach { raw ->
             val side = Archive.sidecar(raw) ?: return@forEach
             val (key, order) = keyOf(side, raw)
             val prev = out[key]
-            if (prev == null || order < prev.first) out[key] = order to labelFor(key, template)
+            if (prev == null || order < prev.first) out[key] = order to labelFor(key, templates)
         }
         return out
     }
@@ -261,9 +278,12 @@ object Report {
      * 必须跟 manifest 走同一套 rowsOf，否则报表里那个「点一下复制文件夹名」
      * 复制出来的名字，在包里根本不存在。
      */
-    fun folderMap(serialNo: String, template: SopTemplate? = null): Map<String, String> {
+    fun folderMap(
+        serialNo: String,
+        templates: List<SopTemplate> = emptyList(),
+    ): Map<String, String> {
         val out = LinkedHashMap<String, String>()
-        val rows = rowsOf(serialNo, template)
+        val rows = rowsOf(serialNo, templates)
         Archive.shots(serialNo).forEach { raw ->
             val side = Archive.sidecar(raw) ?: return@forEach
             val key = keyOf(side, raw).first

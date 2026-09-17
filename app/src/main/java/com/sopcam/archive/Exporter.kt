@@ -76,7 +76,7 @@ object Exporter {
         serials: List<String>,
         opt: Options,
         settings: ExportSettings = ExportSettings(),
-        template: SopTemplate? = null,
+        templates: List<SopTemplate> = emptyList(),
         onProgress: (Int, Int) -> Unit = { _, _ -> },
     ): File? = coroutineScope {
         if (serials.isEmpty() || !opt.any) return@coroutineScope null
@@ -102,7 +102,7 @@ object Exporter {
                     if (opt.watermarked) {
                         // 按检查项分子文件夹：传图时在文件管理器里进那个文件夹，
                         // Ctrl+A 一拖就完事，不用在几十张里挑
-                        val folders = Report.folderMap(sn, template)
+                        val folders = Report.folderMap(sn, templates)
                         // 先并行编码，再顺序写盘 —— zip 流本身不能并发写
                         val cooked = runBlocking {
                             watermarkedOf(sn).map { f ->
@@ -139,7 +139,7 @@ object Exporter {
                 if (settings.htmlReport) {
                     val ext = if (settings.compresses && settings.format == ExportFormat.WEBP)
                         "webp" else "jpg"
-                    val manifest = Report.manifest(serials, ext, opt.watermarked, template)
+                    val manifest = Report.manifest(serials, ext, opt.watermarked, templates)
                     putBytes(
                         zip, "报表.html",
                         Report.html(manifest).toByteArray(Charsets.UTF_8), out

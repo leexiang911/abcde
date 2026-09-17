@@ -100,6 +100,10 @@ fun ShotViewer(
     onDelete: () -> Unit,
     /** 改完 AI 读数要通知外面重读一遍，否则缩略图上的 AI 角标不跟着变 */
     onAiEdited: () -> Unit,
+    /** 这一项配了扫码或切码规则吗 —— 只有这种才给「手填码值」的入口 */
+    codeEditable: Boolean,
+    /** 手填的整串码值。切规则由外面按测试项查，跟扫出来的走同一条路 */
+    onTypeCode: (String) -> Unit,
     onClose: () -> Unit,
 ) {
     val ctx = LocalContext.current
@@ -134,6 +138,8 @@ fun ShotViewer(
     // 一个错值会顺着占位符污染整组的结论
     var aiText by remember(key) { mutableStateOf(item.aiText) }
     var editingAi by remember(key) { mutableStateOf(false) }
+    // 扫码枪扫出来的整串往这儿一贴，跟手机扫到的走同一套切码规则
+    var typingCode by remember(key) { mutableStateOf(false) }
 
     // 水印内容从随行 json 读，预览要跟成片一致
     val side = remember(key) { Archive.sidecar(item.file) }
@@ -382,6 +388,8 @@ fun ShotViewer(
                     hasCode = code.isNotBlank(),
                     scanning = scanning,
                     offerCrop = offerCrop,
+                    codeEditable = codeEditable,
+                    onTypeCode = { typingCode = true },
                     onScan = {
                         scanning = true
                         scope.launch {
@@ -477,9 +485,10 @@ fun ShotViewer(
         }
 
         if (editingAi) {
-            EditAiDialog(
+            EditValueDialog(
+                title = "改 AI 读数",
+                hint = item.stepName.ifBlank { "这张照片" } + "　清空保存表示否掉这个读数",
                 initial = aiText,
-                stepName = item.stepName,
                 onCancel = { editingAi = false },
                 onSave = { v ->
                     editingAi = false
@@ -489,6 +498,19 @@ fun ShotViewer(
                         Archive.setAiResult(item.file, v, if (v.isBlank()) "rejected" else "ok")
                         withContext(Dispatchers.Main) { onAiEdited() }
                     }
+                }
+            )
+        }
+
+        if (typingCode) {
+            EditValueDialog(
+                title = "手填码值",
+                hint = "扫码枪扫出来的整串贴进来。会按这一项配的规则切，跟手机扫到的一样",
+                initial = item.codeRaw.ifBlank { code },
+                onCancel = { typingCode = false },
+                onSave = { v ->
+                    typingCode = false
+                    onTypeCode(v.trim())
                 }
             )
         }
@@ -701,6 +723,8 @@ private fun MoreTray(
     hasCode: Boolean,
     scanning: Boolean,
     offerCrop: Boolean,
+    codeEditable: Boolean,
+    onTypeCode: () -> Unit,
     onScan: () -> Unit,
     onCrop: () -> Unit,
     onClearCode: () -> Unit,
@@ -727,6 +751,17 @@ private fun MoreTray(
             if (hasCode) {
                 TrayButton("清除码值", modifier = Modifier.weight(1f), onClick = onClearCode)
             }
+        }
+
+        // 只有配了扫码或切码规则的项才给手填 —— 其他项根本不需要值，
+        // 多一个按钮只会让人犹豫该不该点
+        if (codeEditable) {
+            Spacer(Modifier.height(8.dp))
+            TrayButton(
+                if (hasCode) "改码值（手填）" else "手填码值",
+                modifier = Modifier.fillMaxWidth(),
+                onClick = onTypeCode
+            )
         }
         Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -798,9 +833,10 @@ private fun BarButton(
  * 清空保存等于否掉这个读数，标成 rejected —— 下次跑批不会再自动把它填回来。
  */
 @Composable
-private fun EditAiDialog(
+private fun EditValueDialog(
+    title: String,
+    hint: String,
     initial: String,
-    stepName: String,
     onCancel: () -> Unit,
     onSave: (String) -> Unit,
 ) {
@@ -822,19 +858,9 @@ private fun EditAiDialog(
                 .clickable(enabled = false) {}
                 .padding(18.dp)
         ) {
-            Text(
-                "改 AI 读数",
-                color = Color.White,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Medium
-            )
+            Text(title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(4.dp))
-            Text(
-                stepName.ifBlank { "这张照片" } + "　清空保存表示否掉这个读数",
-                color = Steel,
-                fontSize = 11.sp,
-                lineHeight = 17.sp
-            )
+            Text(hint, color = Steel, fontSize = 11.sp, lineHeight = 17.sp)
 
             Spacer(Modifier.height(12.dp))
             BasicTextField(

@@ -50,6 +50,11 @@ data class SopStep(
     val prompt: String = "",
     /** 引用提示库里的 id，拍照时能点开看点位图 */
     val hint: String = "",
+    /**
+     * 扫到码之后怎么切。按顺序试，第一条匹配上就用。
+     * 空数组表示整串照收 —— 大多数扫码项要的就是整串。
+     */
+    val parse: List<ParseRule> = emptyList(),
     /** 报表归到哪一行。留空则这一步自成一行 */
     val group: String = "",
     val unit: String = "",
@@ -78,6 +83,7 @@ data class SopStep(
         .put("scan", scan)
         .put("prompt", prompt)
         .put("hint", hint)
+        .put("parse", ParseRule.listToJson(parse))
         .put("group", group)
         .put("unit", unit)
         .apply {
@@ -96,6 +102,7 @@ data class SopStep(
             scan = o.optString("scan", "none").ifBlank { "none" },
             prompt = o.optString("prompt"),
             hint = o.optString("hint"),
+            parse = ParseRule.listFrom(o.optJSONArray("parse")),
             group = o.optString("group"),
             unit = o.optString("unit"),
             rule = Rule.from(o.optJSONObject("rule")),

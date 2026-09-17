@@ -39,8 +39,19 @@ data class ImageMeta(
     val stepGroup: String = "",
     /** 拍完当场写的备注 */
     val note: String = "",
+    /**
+     * 这一项的码值。**配了 parse 规则的话，这里是切完的那段**，
+     * 检修单上要填的就是它；没配规则就是整串。
+     */
     val codeValue: String = "",
     val codeFormat: String = "",
+    /**
+     * 扫出来的原始整串，只在配了 parse 规则时才存。
+     *
+     * 留着是为了能回溯：规则写错了、或者哪天格式变了，
+     * 拿它重新切一遍就行，不用回去重拍。
+     */
+    val codeRaw: String = "",
     /**
      * AI 读数三件套。
      *
@@ -103,6 +114,7 @@ object Xmp {
                 add("sopcam:CodeValue" to meta.codeValue)
                 add("sopcam:CodeFormat" to meta.codeFormat)
             }
+            if (meta.codeRaw.isNotBlank()) add("sopcam:CodeRaw" to meta.codeRaw)
             if (meta.anchor.isNotBlank()) add("sopcam:WatermarkAnchor" to meta.anchor)
             if (meta.topEdge.isNotBlank()) add("sopcam:TopEdge" to meta.topEdge)
             meta.latitude?.let { add("sopcam:Latitude" to it.toString()) }
