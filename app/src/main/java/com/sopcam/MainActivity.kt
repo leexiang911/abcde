@@ -27,6 +27,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
@@ -513,6 +514,11 @@ class MainActivity : ComponentActivity() {
                 )
 
                 Screen.PROJECT_DETAIL -> openProject?.let { p ->
+                    // 有没有照片要从别的项取值。stepOf 每张都要读一次随行 json，
+                    // 所以挂在 openShots 上缓存，别每次重组都把整个目录翻一遍
+                    val hasCompute = remember(openShots) {
+                        openShots.any { stepOf(it)?.source?.isNotBlank() == true }
+                    }
                     ProjectDetailScreen(
                         project = p,
                         shots = openShots,
@@ -614,6 +620,7 @@ class MainActivity : ComponentActivity() {
                             openShots = readShots(p.serialNo)
                         },
                         onAiEdited = { openShots = readShots(p.serialNo) },
+                        hasCompute = hasCompute,
                         codeEditable = { item -> stepOf(item)?.let { st ->
                             st.needsScan || st.parse.isNotEmpty()
                         } ?: false },

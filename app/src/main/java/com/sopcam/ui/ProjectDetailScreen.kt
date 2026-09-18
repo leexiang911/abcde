@@ -134,6 +134,8 @@ fun ProjectDetailScreen(
     onAiEdited: () -> Unit,
     /** 这张图对应的测试项配了扫码或切码规则吗 */
     codeEditable: (ShotItem) -> Boolean,
+    /** 这个项目里有没有配了跨项取值的照片 —— 决定「计算」那一条要不要露出来 */
+    hasCompute: Boolean,
     /** 手填的整串码值 */
     onTypeCode: (ShotItem, String) -> Unit,
     /** 正在跑批时的进度文案，null 表示没在跑 */
@@ -224,6 +226,7 @@ fun ProjectDetailScreen(
             AiBar(
                 pending = shots.count { it.aiState == "pending" },
                 readCount = shots.count { it.aiText.isNotBlank() },
+                hasCompute = hasCompute,
                 progress = aiProgress,
                 onRun = onRunAi,
                 onStop = onStopAi,
@@ -434,11 +437,16 @@ fun ProjectDetailScreen(
 private fun AiBar(
     pending: Int,
     readCount: Int,
+    /** 这个项目里有没有配了跨项取值的照片 */
+    hasCompute: Boolean,
     progress: String?,
     onRun: () -> Unit,
     onStop: () -> Unit,
 ) {
-    if (pending == 0 && readCount == 0 && progress == null) return
+    // hasCompute 也要算进来：全是扫码项、一个 AI 任务都没有的项目，
+    // pending 和 readCount 都是 0，这一条整个不显示 —— 那就没有任何按钮
+    // 能触发跨项取值了。上一版漏了这种情况
+    if (pending == 0 && readCount == 0 && progress == null && !hasCompute) return
     // 全跑完之后按钮也得留着：改过某张的读数，分组结论和组装值就都过期了，
     // 得能再跑一次重算。原来只在 pending > 0 时显示，改完值反而点不了
     val canRun = progress == null
@@ -459,23 +467,25 @@ private fun AiBar(
             Column(Modifier.weight(1f).padding(end = 10.dp)) {
                 Text(
                     when {
-                        progress != null -> "AI 读数中"
+                        progress != null -> "计算中"
                         pending > 0 -> "待读数 $pending 张"
-                        else -> "AI 读数完成"
+                        readCount > 0 -> "AI 读数完成"
+                        // 没有 AI 任务、只有跨项取值的项目
+                        else -> "跨项取值"
                     },
                     color = if (progress != null) Amber else Color.White,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium
                 )
-                if (readCount > 0) {
+                val sub = when {
+                    readCount > 0 && pending > 0 -> "已出值 $readCount 张，点开图片看内容"
+                    readCount > 0 -> "已出值 $readCount 张 · 补拍或改过值之后重算一次"
+                    hasCompute -> "有测试项要从别的项取值，点一下算出来"
+                    else -> ""
+                }
+                if (sub.isNotBlank()) {
                     Spacer(Modifier.height(3.dp))
-                    Text(
-                        if (pending > 0) "已出值 $readCount 张，点开图片看内容"
-                        else "已出值 $readCount 张 · 补拍或改过值之后重算一次",
-                        color = Steel,
-                        fontSize = 11.sp,
-                        lineHeight = 16.sp
-                    )
+                    Text(sub, color = Steel, fontSize = 11.sp, lineHeight = 16.sp)
                 }
             }
             if (progress != null) {
@@ -493,7 +503,11 @@ private fun AiBar(
                 Text(
                     // 跑完之后按钮留着，因为「计算」这一步随时可能需要重跑：
                     // 补拍了被引用的那张、或者改过读数，值都得重算一遍
-                    if (pending > 0) "开始" else "重新计算",
+                    when {
+                        pending > 0 -> "开始"
+                        readCount > 0 -> "重新计算"
+                        else -> "计算"
+                    },
                     color = if (pending > 0) Ink else Amber,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
