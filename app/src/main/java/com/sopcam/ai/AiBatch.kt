@@ -2,10 +2,11 @@ package com.sopcam.ai
 
 import android.content.Context
 import com.sopcam.archive.Archive
+import com.sopcam.sop.CodeParse
 import com.sopcam.sop.SopTemplate
+import java.io.File
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
-import java.io.File
 
 /**
  * AI 读数跑批。
@@ -33,6 +34,8 @@ object AiBatch {
         val failed: Int,
         val cancelled: Boolean,
         val error: String? = null,
+        /** 跨项解析算出来几个值。这一步不用模型，单独计数好让提示说得清楚 */
+        val computed: Int = 0,
     )
 
     /**
@@ -83,17 +86,27 @@ object AiBatch {
         val groups = templates.flatMap { it.groups }
             .filter { it.prompt.isNotBlank() && it.id in used }
             .distinctBy { it.id }
-        if (tasks.isEmpty() && groups.isEmpty()) return Outcome(0, 0, false)
+        // 第一步：跨项解析。纯字符串，不碰模型 ——
+        // 只有这一步要做的话，几十毫秒就完事，不该为它等十几秒去加载 2.6GB
+        val computed = resolveSources(serialNo, templates)
+
+        if (tasks.isEmpty() && groups.isEmpty()) return Outcome(0, 0, false, computed = computed)
 
         if (!LiteRt.isReady || LiteRt.loaded?.path != modelPath) {
             if (modelPath.isBlank()) {
-                return Outcome(0, 0, false, "还没选模型：去 设置 → AI 实验室 加载一次")
+                return Outcome(
+                    0, 0, false,
+                    "还没选模型：去 设置 → AI 实验室 加载一次", computed
+                )
             }
             val device = LiteRt.Device.entries.firstOrNull { it.name == deviceName }
                 ?: LiteRt.Device.GPU
             val r = LiteRt.load(ctx, modelPath, device)
             r.exceptionOrNull()?.let {
-                return Outcome(0, 0, false, "模型加载失败：${it.message ?: it.javaClass.simpleName}")
+                return Outcome(
+                    0, 0, false,
+                    "模型加载失败：${it.message ?: it.javaClass.simpleName}", computed
+                )
             }
         }
 
@@ -103,7 +116,7 @@ object AiBatch {
         for (t in tasks) {
             // 用户退出详情页时协程被取消，在这儿收手 —— 当前这张丢掉，下次重跑
             if (!currentCoroutineContext().isActive) {
-                return Outcome(done, failed, true)
+                return Outcome(done, failed, true, computed = computed)
             }
 
             val r = LiteRt.askImage(ctx, t.file.absolutePath, t.prompt)
@@ -123,7 +136,9 @@ object AiBatch {
         // 成员没跑完就问，等于拿一堆「—」去让模型下结论
         val results = Archive.groupAi(serialNo).toMutableMap()
         for (g in groups) {
-            if (!currentCoroutineContext().isActive) return Outcome(done, failed, true)
+            if (!currentCoroutineContext().isActive) {
+                return Outcome(done, failed, true, computed = computed)
+            }
 
             val shots = Placeholders.indexOf(serialNo, templates)
             val (text, missing) = Placeholders.expand(g.prompt, shots, results)
@@ -146,6 +161,46 @@ object AiBatch {
                 onProgress(done + failed, total, "${g.name}：${r.text}")
             }
         }
-        return Outcome(done, failed, false)
+        return Outcome(done, failed, false, computed = computed)
+    }
+
+    /**
+     * 跨项解析：配了 source 的项，从别人扫到的原串里切出自己要的那段。
+     *
+     * 排在跑批第一步，理由是顺序：拍照的先后不受控（你可能先拍 05 再拍 04），
+     * 拍的时候算就会取不到值。放在这儿统一算一遍，什么时候点都是对的。
+     *
+     * 只写「算出来了」的那些；源还没拍、或者规则没匹配上，就原样不动 ——
+     * 半截值比空值更难查。
+     *
+     * 返回算出了几个。
+     */
+    private fun resolveSources(serialNo: String, templates: List<SopTemplate>): Int {
+        val steps = templates.flatMap { it.steps }.filter { it.source.isNotBlank() }
+        if (steps.isEmpty()) return 0
+
+        val shots = Placeholders.indexOf(serialNo, templates)
+        val results = Archive.groupAi(serialNo)
+        var n = 0
+
+        Archive.shots(serialNo).forEach { file ->
+            val side = Archive.sidecar(file) ?: return@forEach
+            val stepId = side.optString("stepId")
+            if (stepId.isBlank()) return@forEach
+            val step = steps.firstOrNull { it.id == stepId } ?: return@forEach
+
+            val (input, missing) = Placeholders.expand(step.source, shots, results)
+            // 源还没拍到、或者那张还没扫出码 —— 等它有了再算，别写个「—」进去
+            if (missing || input.isBlank()) return@forEach
+
+            val cut = CodeParse.apply(input, step.parse) ?: return@forEach
+            if (cut == side.optString("codeValue")) return@forEach
+
+            // 切完的进 codeValue，源串进 codeRaw：跟自己扫码那条路存法一致，
+            // 手填、重切、报表显示全都不用分情况
+            Archive.updateSidecarCode(file, cut, "DERIVED", codeRaw = input)
+            n++
+        }
+        return n
     }
 }

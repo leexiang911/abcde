@@ -1059,14 +1059,22 @@ class MainActivity : ComponentActivity() {
             withContext(Dispatchers.Main) {
                 aiProgress = null
                 openShots = readShots(serialNo)
+                // 跨项解析是独立的一步（不用模型），单独报出来 ——
+                // 不然「算出 2 个值但没有 AI 任务」会显示成「没有待读数的图片」，
+                // 看着像什么都没干
+                val calc = if (outcome.computed > 0) "算出 ${outcome.computed} 个值" else ""
                 showNote(
                     when {
                         outcome.error != null -> outcome.error
                         outcome.cancelled -> "已停止，跑完的 ${outcome.done} 张已经存下了"
-                        outcome.done == 0 && outcome.failed == 0 -> "没有待读数的图片"
+                        outcome.done == 0 && outcome.failed == 0 ->
+                            calc.ifBlank { "没有要跑的" }
                         outcome.failed > 0 ->
-                            "读完 ${outcome.done} 张，${outcome.failed} 张没读出来，可以再点一次重试"
-                        else -> "AI 读数完成，${outcome.done} 张有值，点开图片查看"
+                            listOf(calc, "读完 ${outcome.done} 张，${outcome.failed} 张没读出来")
+                                .filter { it.isNotBlank() }.joinToString("；") + "，可以再点一次重试"
+                        else ->
+                            listOf(calc, "AI 读数完成，${outcome.done} 张有值")
+                                .filter { it.isNotBlank() }.joinToString("；")
                     }
                 )
             }

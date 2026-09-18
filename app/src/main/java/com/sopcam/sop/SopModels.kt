@@ -55,6 +55,17 @@ data class SopStep(
      * 空数组表示整串照收 —— 大多数扫码项要的就是整串。
      */
     val parse: List<ParseRule> = emptyList(),
+    /**
+     * 值从哪儿来。留空就用这一项自己扫到的码。
+     *
+     * 填了就是跨项取值，写成占位符，例如 `${'$'}{board_code.raw}` ——
+     * 同一个点阵码，编码和型号两项都要用，没道理扫两次。
+     * 取的是别人**扫到的原串**（.raw），不是别人切完的结果：
+     * 切完的那段里往往已经没有你要的部分了。
+     *
+     * 这一步排在跑批的最前面，纯字符串、不用模型。
+     */
+    val source: String = "",
     /** 报表归到哪一行。留空则这一步自成一行 */
     val group: String = "",
     val unit: String = "",
@@ -84,6 +95,7 @@ data class SopStep(
         .put("prompt", prompt)
         .put("hint", hint)
         .put("parse", ParseRule.listToJson(parse))
+        .put("source", source)
         .put("group", group)
         .put("unit", unit)
         .apply {
@@ -103,6 +115,7 @@ data class SopStep(
             prompt = o.optString("prompt"),
             hint = o.optString("hint"),
             parse = ParseRule.listFrom(o.optJSONArray("parse")),
+            source = o.optString("source"),
             group = o.optString("group"),
             unit = o.optString("unit"),
             rule = Rule.from(o.optJSONObject("rule")),

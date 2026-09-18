@@ -7,9 +7,10 @@ import org.json.JSONObject
 /**
  * 提示词和组装值里的 `${测试项ID.ai}` 占位符解析。
  *
- * 三种取值：
+ * 四种取值：
  *  · `${步骤ID.ai}`     —— 那张照片的 AI 读数
- *  · `${步骤ID.scan}`   —— 那张照片扫出来的码值
+ *  · `${步骤ID.scan}`   —— 那张照片的码值（配了切码规则的话，是切完的那段）
+ *  · `${步骤ID.raw}`    —— 那张照片扫到的**原始整串**，没切过的
  *  · `${分组ID.result}` —— 那个分组已经跑出来的结论
  *
  * 取值不受分组边界限制，想引用哪一项都行 —— 这是配置文档里明说的。
@@ -23,7 +24,7 @@ object Placeholders {
 
     // 跟后台 _validate.js 里那条保持一模一样：后台校验能拦下的，
     // 这边就一定解析得了；两边规则不同的话，后台放行的写法到手机上会静默失效
-    private val REF = Regex("""\$\{([A-Za-z0-9._\-]+?)\.(ai|scan|result)\}""")
+    private val REF = Regex("""\$\{([A-Za-z0-9._\-]+?)\.(ai|scan|raw|result)\}""")
 
     /**
      * 一个项目里，每个测试项 ID 对应的那张照片的随行 json。
@@ -76,6 +77,11 @@ object Placeholders {
             val v = when (kind) {
                 "ai" -> shots[id]?.optString("aiText").orEmpty()
                 "scan" -> shots[id]?.optString("codeValue").orEmpty()
+                // raw 取切之前的整串。没配切码规则时 codeRaw 是空的，
+                // 那种情况下 codeValue 本身就是整串，退回去拿它
+                "raw" -> shots[id]?.let {
+                    it.optString("codeRaw").ifBlank { it.optString("codeValue") }
+                }.orEmpty()
                 else -> groupResults[id].orEmpty()
             }
             if (v.isBlank()) {

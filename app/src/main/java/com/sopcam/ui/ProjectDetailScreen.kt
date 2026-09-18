@@ -471,7 +471,7 @@ private fun AiBar(
                     Spacer(Modifier.height(3.dp))
                     Text(
                         if (pending > 0) "已出值 $readCount 张，点开图片看内容"
-                        else "已出值 $readCount 张 · 改过读数就重算一次分组",
+                        else "已出值 $readCount 张 · 补拍或改过值之后重算一次",
                         color = Steel,
                         fontSize = 11.sp,
                         lineHeight = 16.sp
@@ -491,7 +491,9 @@ private fun AiBar(
                 )
             } else if (canRun) {
                 Text(
-                    if (pending > 0) "开始" else "重算分组",
+                    // 跑完之后按钮留着，因为「计算」这一步随时可能需要重跑：
+                    // 补拍了被引用的那张、或者改过读数，值都得重算一遍
+                    if (pending > 0) "开始" else "重新计算",
                     color = if (pending > 0) Ink else Amber,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
