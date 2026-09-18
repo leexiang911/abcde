@@ -476,10 +476,12 @@ figcaption{font-family:var(--mono);font-size:10.5px;color:var(--mute);
 .data{padding:22px 0 22px 20px;border-left:1px solid var(--rule)}
 /* 识别值：机器从图里读出来的，不给编辑，点一下复制 */
 .read{margin-bottom:14px}
+/* pre-wrap：切码规则可以输出多行（编码一行、型号一行），
+   HTML 默认会把换行折成空格，那样两行就挤成一行了 */
 .read .val{display:block;font-family:var(--mono);font-size:13px;
   padding:7px 10px;background:#fff;border:1px solid var(--rule);
   border-left:3px solid var(--pass);cursor:copy;margin-bottom:4px;
-  word-break:break-all;line-height:1.4}
+  white-space:pre-wrap;word-break:break-all;line-height:1.4}
 .read .val:hover{border-color:var(--ink);border-left-color:var(--pass)}
 .read .none{color:var(--mute);font-size:12px}
 

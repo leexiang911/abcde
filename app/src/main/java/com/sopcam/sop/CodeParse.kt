@@ -29,7 +29,12 @@ import org.json.JSONObject
 data class ParseRule(
     /** 匹配整串码值的正则。匹配不上就轮到下一条 */
     val match: String,
-    /** 输出模板，用 $1 $2 引用捕获组，跟 JS 的 String.replace 一样 */
+    /**
+     * 输出模板，用 $1 $2 引用捕获组，跟 JS 的 String.replace 一样。
+     *
+     * 想输出多行就写 \n（反斜杠加 n）—— 后台那个输入框是拿真换行分隔规则的，
+     * 模板里直接敲回车会被当成下一条规则。
+     */
     val out: String,
 ) {
     fun toJson(): JSONObject = JSONObject().put("match", match).put("out", out)
@@ -71,9 +76,15 @@ object CodeParse {
         for (r in rules) {
             val re = runCatching { Regex(r.match) }.getOrNull() ?: continue
             val m = re.find(raw) ?: continue
-            return GROUP_REF.replace(r.out) { ref ->
-                val i = ref.groupValues[1].toInt()
-                m.groupValues.getOrNull(i).orEmpty()
+            // 先按模板里的 \n 切段，再各段填捕获组，最后用真换行接起来。
+            //
+            // 不能填完再统一替换 —— 那样码值里万一真有「反斜杠 n」这两个字符，
+            // 会被当成换行转掉。码值是数据，格式只该由模板说了算。
+            return r.out.split("\\n").joinToString("\n") { seg ->
+                GROUP_REF.replace(seg) { ref ->
+                    val i = ref.groupValues[1].toInt()
+                    m.groupValues.getOrNull(i).orEmpty()
+                }
             }
         }
         return null
