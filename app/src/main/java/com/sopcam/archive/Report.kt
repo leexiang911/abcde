@@ -54,12 +54,16 @@ object Report {
             val steps = LinkedHashMap<String, JSONObject>()
             // 分组横跨哪些序号、叫什么名字，先算一遍 —— 行和文件夹都照这个来
             val rows = rowsOf(sn, templates)
+            // 没有测点的行，本行有哪几个 AI 读数。攒着是为了等本行的图走完
+            // 才知道到底有几个 —— 只有一个才敢往框里填，见下面的行级预填
+            val loose = LinkedHashMap<String, MutableList<String>>()
 
             Archive.shots(sn).forEach { raw ->
                 val side = Archive.sidecar(raw) ?: JSONObject()
                 val key = keyOf(side, raw).first
                 val (order, name) = rows[key] ?: (side.optInt("stepOrder", 0) to "自由拍摄")
                 val point = side.optString("stepPoint")
+                val reading = readingOf(side.optString("aiText"))
 
                 val group = steps.getOrPut(key) {
                     JSONObject()
@@ -96,6 +100,9 @@ object Report {
                         // 合成一行之后，组里这几张分别是哪个测试项，就只剩这个字段说得清了
                         //（温度1 一行下面既有阻值也有电压）
                         .put("step", side.optString("stepName"))
+                        // 测点名。管压降六张图的 stepName 是同一个，右栏那几个
+                        // 可复制的 AI 值只能靠它区分是哪一相
+                        .put("point", point)
                         // 拍照时打的备注。跟着这张图走，不并到组上 ——
                         // 一组里几张图各说各的事，合在一起就分不清哪句对应哪张
                         .put("note", side.optString("note"))
@@ -107,8 +114,16 @@ object Report {
                 // 每个测点一个格子。同一测点拍多张，格子还是一个
                 if (point.isNotBlank()) {
                     val pts = group.getJSONArray("points")
-                    val seen = (0 until pts.length()).any { pts.getJSONObject(it).optString("name") == point }
-                    if (!seen) pts.put(JSONObject().put("name", point).put("value", ""))
+                    val cell = (0 until pts.length())
+                        .map { pts.getJSONObject(it) }
+                        .firstOrNull { it.optString("name") == point }
+                        ?: JSONObject().put("name", point).put("value", "").also { pts.put(it) }
+                    // AI 读出来的数直接填进框里 —— 不填的话人还得点开每张图去抄。
+                    // 同一测点拍了好几张就按后拍的算，跟占位符取值「取最后一张」一个规矩：
+                    // 重拍就是因为前一张不对
+                    if (reading != null) cell.put("value", reading).put("from", "ai")
+                } else if (reading != null) {
+                    loose.getOrPut(key) { mutableListOf() }.add(reading)
                 }
 
                 // 码值汇到组上，报表右栏直接显示，不用在图底下找
@@ -118,6 +133,14 @@ object Report {
                     val has = (0 until arr.length()).any { arr.optString(it) == code }
                     if (!has) arr.put(code)
                 }
+            }
+
+            // 没有测点的行：全行只读出一个数才填。
+            // 两个数以上填哪个都是猜 —— 留空，值在右栏「识别值」里点一下就能复制
+            steps.forEach { (key, g) ->
+                if (g.getJSONArray("points").length() > 0) return@forEach
+                val only = loose[key]?.singleOrNull() ?: return@forEach
+                g.put("value", only).put("valueFrom", "ai")
             }
 
             // 自由拍摄（序号 0）排到最后；两组序号相同时按最早那张的时间排，
@@ -184,6 +207,29 @@ object Report {
             .put("generatedText", dateFmt.format(Date()))
             .put("projects", projects)
     }
+
+    /**
+     * 「一个数 + 可选单位」。matches() 要求整串命中，所以不用写首尾锚点 ——
+     * 美元符号在 Kotlin 原始字符串里是模板占位，能不写就不写。
+     *
+     * 单位里的非 ASCII 字符有重码位：欧姆是 Ω(U+03A9) 和 Ω(U+2126)，
+     * 微是 μ(U+03BC) 和 µ(U+00B5)，模型吐哪个都算数。
+     */
+    private val READING = Regex("""[+-]?\d+(?:\.\d+)?\s*[A-Za-zΩΩμµ°％%/]{0,6}""")
+
+    /**
+     * AI 读出来的这段文字，能不能直接当读数填进报表的框里。
+     *
+     * 报表里的 num() 是「剥掉所有非数字字符再 parseFloat」。
+     * 模型答「0.42 / 0.45」（一张图里拍到两个读数）会被剥成 0.420.45，
+     * parseFloat 取到 0.42 —— **值是错的，页面上还看不出来**。
+     * 这个数最后要抄进检修单，宁可留空让人点一下复制，也不能静默填错。
+     *
+     * 所以只认单个读数，「两个数」「一句话」「没读出来」一律不填 ——
+     * 它们照样会出现在右栏的识别值里，一点就复制，只是不自动进框。
+     */
+    private fun readingOf(ai: String): String? =
+        ai.trim().takeIf { it.isNotEmpty() && READING.matches(it) }
 
     /** 把总表塞进模板。`</` 要转义，否则 JSON 里出现 </script> 会把脚本块提前截断 */
     fun html(manifest: JSONObject): String {
@@ -484,6 +530,13 @@ figcaption{font-family:var(--mono);font-size:10.5px;color:var(--mute);
   white-space:pre-wrap;word-break:break-all;line-height:1.4}
 .read .val:hover{border-color:var(--ink);border-left-color:var(--pass)}
 .read .none{color:var(--mute);font-size:12px}
+/* AI 读出来的值。左边框换成蓝色，跟扫出来的码一眼分得开 ——
+   码是确定的，AI 值是要人看一眼的 */
+.read .val.ai{border-left-color:#7BC6FF}
+/* 前缀标签说这个值是哪张图读的（管压降六张图的测试项名是同一个，
+   只有测点名分得清是哪一相）。标签不进剪贴板，data-copy 里只有纯值 */
+.read .val i{font-style:normal;font-size:10.5px;color:var(--mute);
+  margin-right:8px;user-select:none}
 
 label{display:block;font-size:11px;letter-spacing:.1em;color:var(--mute);
   text-transform:uppercase;font-family:var(--mono);margin-bottom:5px}
@@ -494,6 +547,17 @@ input[type=text]:focus{outline:2px solid var(--mark);outline-offset:-1px;border-
 .ptname{font-family:var(--mono);font-size:11.5px;color:var(--mute);
   min-width:52px;flex-shrink:0}
 .pt input{flex:1}
+/* 输入框的外壳，只为了给 AI 预填的框挂一个角标 —— input 自己没有 ::after。
+   类名别叫 box，#box 是灯箱，看代码时会串 */
+.fld{position:relative;display:block;flex:1}
+.fld input{width:100%}
+/* AI 预填过的框：淡蓝底 + 角标。标记的意思是「这个数还没人看过」，
+   所以人一动手就掉（见 bind），不是「这个数是对的」 */
+.fld.af input{background:#F2F9FF;border-color:#BFE2FF;padding-right:36px}
+.fld.af::after{content:"AI";position:absolute;right:7px;top:50%;
+  transform:translateY(-50%);font-family:var(--mono);font-size:9.5px;
+  letter-spacing:.08em;color:#2B7FBF;background:#DCEFFF;padding:1px 4px;
+  pointer-events:none}
 .auto{font-size:12px;line-height:1.5;margin-top:8px;min-height:1px}
 .auto.yes{color:var(--pass)}
 .auto.no{color:var(--fail)}
@@ -542,6 +606,10 @@ footer b{color:var(--ink)}
   .step.shut .asm{display:flex!important}
   .caret,.count{display:none}
   .bar,#box,.copied,.verdicts{display:none}
+  /* 纸上不分值是谁填的：底色打出来是一片灰，角标是噪音。
+     值本身照常打印 */
+  .fld.af input{background:#fff;border-color:var(--rule);padding-right:10px}
+  .fld.af::after{display:none}
   .step{break-inside:avoid}
   figure img{height:auto}
 }
@@ -687,11 +755,23 @@ function render(){
       html += '<div class="read">';
       html += '<label>识别值</label>';
       var codes = s.codes || [];
-      if (codes.length) {
-        codes.forEach(function(c){
-          html += '<span class="val copyable" data-copy="' + esc(c) + '">' + esc(c) + '</span>';
-        });
-      } else {
+      codes.forEach(function(c){
+        html += '<span class="val copyable" data-copy="' + esc(c) + '">' + esc(c) + '</span>';
+      });
+      // AI 读出来的值也列在这儿：以前只压在缩略图上（pointer-events:none，
+      // 点不着），要复制得先点开大图。抄进检修单的就是这些数，得伸手可及。
+      // 已经预填进下面框里的那些照样列 —— 规则简单、位置固定，
+      // 不用去想「这个值为什么在那边不在这边」
+      var reads = (s.shots || []).filter(function(sh){ return sh.ai; });
+      reads.forEach(function(sh){
+        // 标签说这值是哪张图读的。测点优先（管压降六张的测试项名是同一个），
+        // 没测点才用测试项名，跟行名一样时就不标了 —— 标了也是废话
+        var tag = sh.point || (sh.step && sh.step !== s.name ? sh.step : "");
+        html += '<span class="val ai copyable" data-copy="' + esc(sh.ai) + '">';
+        if (tag) html += '<i>' + esc(tag) + '</i>';
+        html += esc(sh.ai) + '</span>';
+      });
+      if (!codes.length && !reads.length) {
         html += '<span class="none">这组图里没识别到码</span>';
       }
       html += '</div>';
@@ -702,11 +782,15 @@ function render(){
         s.points.forEach(function(pt, pi){
           html += '<div class="pt">';
           html += '<span class="ptname">' + esc(pt.name) + '</span>';
+          html += '<span class="fld' + (pt.from === "ai" ? ' af' : '') + '">';
           html += '<input type="text" data-pt="' + pi + '" value="' + esc(pt.value) + '">';
+          html += '</span>';
           html += '</div>';
         });
       } else {
+        html += '<span class="fld' + (s.valueFrom === "ai" ? ' af' : '') + '">';
         html += '<input type="text" data-f="value" placeholder="例如 12.4" value="' + esc(s.value) + '">';
+        html += '</span>';
       }
       html += '<div class="auto" data-auto></div>';
       html += '<div class="verdicts">';
@@ -731,6 +815,13 @@ function render(){
 
 function stepEl(pi, si){
   return document.querySelector('.step[data-p="' + pi + '"][data-s="' + si + '"]');
+}
+
+/* 人一动手，AI 标记就掉 —— 它标的是「这个数还没人看过」，不是「这个数是对的」。
+   数据里的 from 也一起清掉，不然重绘一次标记又回来了 */
+function unmark(inp){
+  var fld = inp.closest(".fld");
+  if (fld) fld.classList.remove("af");
 }
 
 function paint(pi, si){
@@ -978,14 +1069,19 @@ function bind(){
 
     el.querySelectorAll("input[data-f]").forEach(function(inp){
       inp.addEventListener("input", function(){
-        step[inp.getAttribute("data-f")] = inp.value;
+        var f = inp.getAttribute("data-f");
+        step[f] = inp.value;
+        if (f === "value") { step.valueFrom = ""; unmark(inp); }
         judge(pi, si);
       });
     });
 
     el.querySelectorAll("input[data-pt]").forEach(function(inp){
       inp.addEventListener("input", function(){
-        step.points[+inp.getAttribute("data-pt")].value = inp.value;
+        var pt = step.points[+inp.getAttribute("data-pt")];
+        pt.value = inp.value;
+        pt.from = "";
+        unmark(inp);
         judge(pi, si);
       });
     });
