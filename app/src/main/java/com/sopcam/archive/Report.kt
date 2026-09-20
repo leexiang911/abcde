@@ -409,7 +409,7 @@ button.go{background:var(--mark);border-color:var(--mark);font-weight:600}
 .step.shut .caret{transform:rotate(-90deg)}
 /* 折叠要真的塌下去：图片和整个右栏都收起来，行高压到一行。
    只藏图片的话右边那列输入框还撑着高度，滚半天才翻一项 */
-.step.shut .shots,.step.shut .refdes,.step.shut .data{display:none}
+.step.shut .shots,.step.shut .refdes,.step.shut .data,.step.shut .asm{display:none}
 .step.shut .body{padding:9px 22px 9px 4px}
 .step.shut .rail{padding:9px 0}
 .step.shut .title{font-size:15px}
@@ -537,6 +537,9 @@ footer b{color:var(--ink)}
   body{background:#fff}
   /* 打印要的是完整记录，折叠状态不该带到纸上 */
   .step.shut .shots,.step.shut .refdes{display:block!important}
+  /* 组装值折起来时是藏着的，但纸上必须有 —— 检修单要填的就是它。
+     这里单独写 flex，不能并到上面那条 block 里去，那样标签和值会各占一行 */
+  .step.shut .asm{display:flex!important}
   .caret,.count{display:none}
   .bar,#box,.copied,.verdicts{display:none}
   .step{break-inside:avoid}
