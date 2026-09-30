@@ -93,7 +93,7 @@ fun SetupScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("开工", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+            Text("主页", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Action("项目", onProjects)
                 Spacer(Modifier.width(8.dp))
@@ -102,16 +102,16 @@ fun SetupScreen(
         }
         Spacer(Modifier.height(4.dp))
         Text(
-            "照片自动绑定控制器信息，原图另存归档区",
+            "照片自动绑定项目，原图另存归档区",
             color = Steel, fontSize = 13.sp
         )
 
         Spacer(Modifier.height(24.dp))
-        Field("控制器序列号", serialNo, "0104215HZN92952565", onSerialChange, onScanSerial)
+        Field("项目序列号", serialNo, "自定义名字/扫码", onSerialChange, onScanSerial)
 
         Spacer(Modifier.height(14.dp))
         PickerField(
-            label = "控制器型号",
+            label = "一级分类",
             selected = modelOption,
             hint = "请选择控制器型号",
             modifier = Modifier.fillMaxWidth(),
@@ -119,7 +119,7 @@ fun SetupScreen(
         )
         Spacer(Modifier.height(14.dp))
         PickerField(
-            label = "故障类型",
+            label = "二级分类",
             selected = faultOption,
             hint = "4S 店描述的故障",
             modifier = Modifier.fillMaxWidth(),
@@ -127,7 +127,7 @@ fun SetupScreen(
         )
         Spacer(Modifier.height(14.dp))
         PickerField(
-            label = "所属平台",
+            label = "三级分类",
             selected = platformOption,
             hint = if (platformEnabled) "请选择平台" else "先选型号",
             enabled = platformEnabled,
@@ -141,7 +141,7 @@ fun SetupScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("检修流程", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+            Text("相机SOP流程", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Medium)
             Action("新建流程", onNewTemplate)
         }
 
@@ -149,7 +149,7 @@ fun SetupScreen(
 
         if (templates.isEmpty()) {
             Text(
-                "还没有流程。点「新建流程」，把检修单上的测试项目整列复制进去，一行一条就能建好。",
+                "还没有流程。点「新建流程」，一行一条就能建好。｜ 设置中URL导入",
                 color = Steel, fontSize = 14.sp,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -186,7 +186,7 @@ fun SetupScreen(
         }
 
         Spacer(Modifier.height(28.dp))
-        PrimaryButton(label = "开始检修拍摄", onClick = onStart)
+        PrimaryButton(label = "开始SOP拍摄", onClick = onStart)
 
         // 跳过流程降级成小字：核心价值是按 SOP 拍，不该让人第一眼就想着绕开
         if (activeTemplateId.isNotBlank()) {

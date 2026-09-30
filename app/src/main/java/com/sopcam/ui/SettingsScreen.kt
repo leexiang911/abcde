@@ -93,9 +93,9 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(10.dp))
         Text(
-            "序列号、控制器型号、平台和故障类型不会画在照片上——那些是给机器读的，" +
-                "盖在板子上只会挡视线。它们只写进元数据。" +
-                "水印总开关在相机界面的田字格里，随手就能关。",
+            "时间水印、SOP水印 默认是写到图片元数据" +
+                    "即使不显示内容，也能后续恢复，能识别图片数据有没有被更改，ai时代下保证图片真实性" +
+                    "水印总开关在相机界面的田字格里，随手就能关。",
             color = Steel,
             fontSize = 12.sp,
             lineHeight = 19.sp,
@@ -131,18 +131,18 @@ fun SettingsScreen(
 
         SwitchRow(
             title = "同时保存无水印原图",
-            desc = "存到 Documents/SOP归档，不进相册。水印照片删了能从这里恢复，代价是占用翻倍。",
+            desc = "存到 Documents/SOP归档，不进相册。水印照片删了能从这里恢复。",
             checked = settings.keepOriginal,
         ) { onChange(settings.copy(keepOriginal = it)) }
 
         Spacer(Modifier.height(28.dp))
-        SectionTitle("流程配置")
+        SectionTitle("URL流程配置导入")
 
         var url by remember(settings.configUrl) { mutableStateOf(settings.configUrl) }
 
         Text(
-            "填 index.json 的地址。流程、型号目录、故障类型和提示图都从那儿下载，" +
-                "所有人用同一份标准。",
+//            填 index.json 的地址。流程、型号目录、故障类型和提示图都从那儿下载，
+            "从网站服务器导入SOP配置",
             color = Steel, fontSize = 12.sp, lineHeight = 18.sp
         )
         Spacer(Modifier.height(8.dp))
@@ -156,7 +156,7 @@ fun SettingsScreen(
         ) {
             if (url.isEmpty()) {
                 Text(
-                    "https://raw.githubusercontent.com/…/index.json",
+                    "SOP流程配置 URL 链接",
                     color = Color(0xFF4A525C), fontSize = 12.sp, maxLines = 1
                 )
             }
@@ -230,7 +230,7 @@ fun SettingsScreen(
         SectionTitle("快门反馈")
 
         SwitchRow(
-            title = "震动",
+            title = "快门震动",
             desc = "按下快门时震一下",
             checked = settings.shutterVibrate,
         ) { onChange(settings.copy(shutterVibrate = it)) }
@@ -238,17 +238,16 @@ fun SettingsScreen(
         Spacer(Modifier.height(10.dp))
 
         SwitchRow(
-            title = "提示音",
-            desc = "按下快门时响一声。跟随系统媒体音量，静音模式下不响。",
+            title = "快门提示音",
+            desc = "快门提示音",
             checked = settings.shutterSound,
         ) { onChange(settings.copy(shutterSound = it)) }
 
         Spacer(Modifier.height(10.dp))
 
         SwitchRow(
-            title = "拍完停一下",
-            desc = "每拍一张先停在预览上：拍错了当场重拍，还能顺手写句备注。" +
-                "备注用系统输入法，想说话就点输入法的麦克风。",
+            title = "拍完停顿",
+            desc = "预览刚拍照片｜备注｜撤销",
             checked = settings.confirmEachShot,
         ) { onChange(settings.copy(confirmEachShot = it)) }
 
@@ -257,15 +256,13 @@ fun SettingsScreen(
 
         SwitchRow(
             title = "取景时扫码",
-            desc = "边取景边识别画面里的条码或二维码，扫到的内容写进照片元数据。不用扫码的活儿可以关掉省电。",
+            desc = "边取景边识别画面里的条码或二维码，放到取景框。",
             checked = settings.scanInViewfinder,
         ) { onChange(settings.copy(scanInViewfinder = it)) }
 
         SwitchRow(
             title = "自由拍摄也扫码",
-            desc = "没走流程随手拍的照片也顺带扫一遍，只认二维码和条形码，" +
-                "不跑板子上那种点阵丝印码 —— 那套要多跑七八趟，随手拍的图多半没有码，白烧电。" +
-                "点阵丝印码请在项目详情里框选或批量扫码。走流程时这个开关不起作用，听测试项配置的。",
+            desc = "拍完照片，自动对图片中条码，二维码取值",
             checked = settings.scanFreeShots,
         ) { onChange(settings.copy(scanFreeShots = it)) }
 
@@ -274,15 +271,14 @@ fun SettingsScreen(
 
         SwitchRow(
             title = "记录 GPS 位置",
-            desc = "车间在室内基本收不到卫星信号，多半是空的。需要定位权限。",
+            desc = "为照片写入GPS经纬度位置，需要定位权限",
             checked = settings.recordGps,
         ) { onChange(settings.copy(recordGps = it)) }
 
         Spacer(Modifier.height(20.dp))
         Text(
-            "无论水印开不开，每张照片都会写入：唯一 ID、拍摄时间、手机型号和系统版本、" +
-                "序列号、控制器型号、平台、故障类型、SOP 步骤序号和名称。" +
-                "所以以后想重新排版水印，照着元数据批量重烧就行。",
+            "每张照片都会写入：唯一 ID、拍摄时间、手机型号和系统版本",
+//            所以以后想重新排版水印，验证图片是否真实（现在ai成本越来越低，图片容易被p图，如果p图，元数据HASH会被破坏
             color = Steel,
             fontSize = 13.sp,
             lineHeight = 20.sp,
@@ -318,7 +314,11 @@ private fun SwitchRow(
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(Modifier.weight(1f).padding(end = 14.dp)) {
+        Column(
+            Modifier
+                .weight(1f)
+                .padding(end = 14.dp)
+        ) {
             Text(title, color = Color.White, fontSize = 16.sp)
             Spacer(Modifier.height(5.dp))
             Text(desc, color = Steel, fontSize = 12.sp, lineHeight = 18.sp)

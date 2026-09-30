@@ -23,10 +23,14 @@ import java.io.File
  */
 object LiteRt {
 
+//    GPU", "一般最快，要 Manifest 里声明 OpenCL 库"
+//    CPU", "最稳，慢一些"
+//    要厂商原生库，Maven 包里没有
     enum class Device(val label: String, val note: String, val usable: Boolean) {
-        GPU("GPU", "一般最快，要 Manifest 里声明 OpenCL 库", true),
-        CPU("CPU", "最稳，慢一些", true),
-        NPU("NPU", "要厂商原生库，Maven 包里没有", false),
+
+        GPU("GPU", "比较快", true),
+        CPU("CPU", "稳定 速度慢", true),
+        NPU("NPU", "暂未适配", false),
     }
 
     data class Loaded(val path: String, val device: Device, val millis: Long)
