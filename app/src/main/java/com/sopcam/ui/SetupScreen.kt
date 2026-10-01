@@ -93,7 +93,7 @@ fun SetupScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("开工", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+            Text("主页", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Action("项目", onProjects)
                 Spacer(Modifier.width(8.dp))
@@ -102,37 +102,40 @@ fun SetupScreen(
         }
         Spacer(Modifier.height(4.dp))
         Text(
-            "照片自动绑定控制器信息，原图另存归档区",
+            "照片自动绑定项目，原图另存归档区",
             color = Steel, fontSize = 13.sp
         )
 
         Spacer(Modifier.height(24.dp))
-        Field("控制器序列号", serialNo, "0104215HZN92952565", onSerialChange, onScanSerial)
+        Field("项目序列号", serialNo, "自定义名字/扫码", onSerialChange, onScanSerial)
 
+        // 显示名是通用的「一级 / 二级 / 标签」，底下的字段仍然叫 model / platform / fault ——
+        // 照片元数据、后台配置、报表都按这几个键读写，改键就读不出老数据了。
+        // 二级挂在一级下面（先选一级才能选二级），所以紧跟着一级；标签是独立的，放最后
         Spacer(Modifier.height(14.dp))
         PickerField(
-            label = "控制器型号",
+            label = "一级分类",
             selected = modelOption,
-            hint = "请选择控制器型号",
+            hint = "请选择一级分类",
             modifier = Modifier.fillMaxWidth(),
             onTap = onModelTap
         )
         Spacer(Modifier.height(14.dp))
         PickerField(
-            label = "故障类型",
-            selected = faultOption,
-            hint = "4S 店描述的故障",
-            modifier = Modifier.fillMaxWidth(),
-            onTap = onFaultTap
-        )
-        Spacer(Modifier.height(14.dp))
-        PickerField(
-            label = "所属平台",
+            label = "二级分类",
             selected = platformOption,
-            hint = if (platformEnabled) "请选择平台" else "先选型号",
+            hint = if (platformEnabled) "请选择二级分类" else "先选一级分类",
             enabled = platformEnabled,
             modifier = Modifier.fillMaxWidth(),
             onTap = onPlatformTap
+        )
+        Spacer(Modifier.height(14.dp))
+        PickerField(
+            label = "标签",
+            selected = faultOption,
+            hint = "可选",
+            modifier = Modifier.fillMaxWidth(),
+            onTap = onFaultTap
         )
 
         Spacer(Modifier.height(28.dp))
@@ -141,7 +144,7 @@ fun SetupScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("检修流程", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+            Text("相机SOP流程", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Medium)
             Action("新建流程", onNewTemplate)
         }
 
@@ -149,7 +152,7 @@ fun SetupScreen(
 
         if (templates.isEmpty()) {
             Text(
-                "还没有流程。点「新建流程」，把检修单上的测试项目整列复制进去，一行一条就能建好。",
+                "还没有流程。点「新建流程」，一行一个测试项就能建好；也可以在设置里用 URL 导入。",
                 color = Steel, fontSize = 14.sp,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -161,7 +164,7 @@ fun SetupScreen(
             PickerField(
                 label = "",
                 selected = templateOption,
-                hint = "请选择检修流程",
+                hint = "请选择流程",
                 modifier = Modifier.fillMaxWidth(),
                 onTap = onTemplateTap
             )
@@ -186,7 +189,7 @@ fun SetupScreen(
         }
 
         Spacer(Modifier.height(28.dp))
-        PrimaryButton(label = "开始检修拍摄", onClick = onStart)
+        PrimaryButton(label = "开始SOP拍摄", onClick = onStart)
 
         // 跳过流程降级成小字：核心价值是按 SOP 拍，不该让人第一眼就想着绕开
         if (activeTemplateId.isNotBlank()) {
@@ -242,7 +245,7 @@ fun TemplateEditScreen(
         }
 
         Spacer(Modifier.height(20.dp))
-        Field("流程名称", name, "逆变器控制板检修", { name = it })
+        Field("流程名称", name, "例如：日常点检", { name = it })
 
         Spacer(Modifier.height(20.dp))
         Text("测试项目", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
@@ -252,7 +255,7 @@ fun TemplateEditScreen(
                 "读到 JSON 流程：${asJson.name} · ${asJson.steps.size} 个测点" +
                     if (asJson.groups.isNotEmpty()) " · ${asJson.groups.size} 组判定规则" else ""
             else
-                "一行一条。从检修单表格整列复制过来也行，行首的序号和「正常」那列会自动去掉。" +
+                "一行一个测试项。从表格里整列复制过来也行，行首的序号和「正常」那列会自动去掉。" +
                     "带测点和判定规则的完整流程，直接粘 JSON 进来。",
             color = if (asJson != null) Done else Steel,
             fontSize = 13.sp,

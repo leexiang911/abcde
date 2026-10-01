@@ -321,11 +321,11 @@ object Report {
     }
 
     private fun titleOf(m: JSONObject): String {
-        val arr = m.optJSONArray("projects") ?: return "检修留档"
+        val arr = m.optJSONArray("projects") ?: return "SOP 留档"
         return when (arr.length()) {
-            0 -> "检修留档"
-            1 -> arr.getJSONObject(0).optString("serialNo", "检修留档")
-            else -> "检修留档 · " + arr.length() + " 个项目"
+            0 -> "SOP 留档"
+            1 -> arr.getJSONObject(0).optString("serialNo", "SOP 留档")
+            else -> "SOP 留档 · " + arr.length() + " 个项目"
         }
     }
 
@@ -338,7 +338,7 @@ object Report {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>__TITLE__ · 检修留档</title>
+<title>__TITLE__ · SOP 留档</title>
 <style>
 :root{
   --paper:#FBFAF7; --ink:#16191C; --rule:#DEDBD3; --mute:#6B7076;
@@ -603,9 +603,9 @@ function render(){
 
   DATA.projects.forEach(function(p, pi){
     var tags = [];
-    if (p.model) tags.push(["控制器型号", p.model]);
-    if (p.platform) tags.push(["平台", p.platform]);
-    if (p.fault) tags.push(["故障类型", p.fault]);
+    if (p.model) tags.push(["一级分类", p.model]);
+    if (p.platform) tags.push(["二级分类", p.platform]);
+    if (p.fault) tags.push(["标签", p.fault]);
 
     html += '<header>';
     html += '<div class="eyebrow">controller serial</div>';
@@ -1039,7 +1039,7 @@ function tsv(pi){
   var rows = [];
   swLines(pi).forEach(function(t){ rows.push(t); });
   if (rows.length) rows.push("");
-  rows.push(["序号","检修项目","位号","读数","结论","图片"].join("\t"));
+  rows.push(["序号","测试项","位号","读数","结论","图片"].join("\t"));
   p.steps.forEach(function(s){
     var files = s.shots.map(function(x){ return x.name; }).join(" ");
     // 有测点的写成「测点=值」，没测点的直接罗值

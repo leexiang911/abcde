@@ -117,7 +117,7 @@ fun AiLabScreen(
             Column {
                 Text("AI 实验室", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(3.dp))
-                Text("先验证跑不跑得动、准不准", color = Steel, fontSize = 12.sp)
+                Text("先验证模型能否跑动，是否准确", color = Steel, fontSize = 12.sp)
             }
             Text(
                 "返回",
@@ -135,7 +135,7 @@ fun AiLabScreen(
         Section("模型文件")
 
         if (models.isEmpty()) {
-            Hint("没找到 .litertlm 文件。放到 Download、Documents 或存储根目录的 Models 文件夹里，再回来。")
+            Hint(" Download、Documents 或存储根目录的 Models 文件夹中没找到 .litertlm 文件。")
         } else {
             models.forEach { f ->
                 val on = picked?.absolutePath == f.absolutePath

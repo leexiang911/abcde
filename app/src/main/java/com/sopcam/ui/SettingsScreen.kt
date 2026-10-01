@@ -92,9 +92,11 @@ fun SettingsScreen(
         ) { onChange(settings.copy(showSopStep = it)) }
 
         Spacer(Modifier.height(10.dp))
+        // 别在这儿写「能识别图片有没有被改过」：元数据是普通 XMP，没有哈希也没有签名，
+        // 图改完把元数据原样写回去，谁也发现不了。要做防篡改得另加原图哈希（防手滑）
+        // 或签名（防人），做之前这句承诺不能出现在界面上
         Text(
-            "序列号、控制器型号、平台和故障类型不会画在照片上——那些是给机器读的，" +
-                "盖在板子上只会挡视线。它们只写进元数据。" +
+            "水印的内容同时写进照片元数据，水印关了也不丢，以后可以照着元数据重新烧水印。" +
                 "水印总开关在相机界面的田字格里，随手就能关。",
             color = Steel,
             fontSize = 12.sp,
@@ -131,18 +133,18 @@ fun SettingsScreen(
 
         SwitchRow(
             title = "同时保存无水印原图",
-            desc = "存到 Documents/SOP归档，不进相册。水印照片删了能从这里恢复，代价是占用翻倍。",
+            desc = "存到 Documents/SOP归档，不进相册。水印照片删了能从这里恢复，代价是占用空间翻倍。",
             checked = settings.keepOriginal,
         ) { onChange(settings.copy(keepOriginal = it)) }
 
         Spacer(Modifier.height(28.dp))
-        SectionTitle("流程配置")
+        SectionTitle("URL流程配置导入")
 
         var url by remember(settings.configUrl) { mutableStateOf(settings.configUrl) }
 
+        // 地址填后台的 /c/index.json。流程、分类目录、标签和提示图都从那儿下
         Text(
-            "填 index.json 的地址。流程、型号目录、故障类型和提示图都从那儿下载，" +
-                "所有人用同一份标准。",
+            "从网站服务器导入 SOP 配置",
             color = Steel, fontSize = 12.sp, lineHeight = 18.sp
         )
         Spacer(Modifier.height(8.dp))
@@ -156,7 +158,7 @@ fun SettingsScreen(
         ) {
             if (url.isEmpty()) {
                 Text(
-                    "https://raw.githubusercontent.com/…/index.json",
+                    "SOP 流程配置的 URL 链接",
                     color = Color(0xFF4A525C), fontSize = 12.sp, maxLines = 1
                 )
             }
@@ -230,7 +232,7 @@ fun SettingsScreen(
         SectionTitle("快门反馈")
 
         SwitchRow(
-            title = "震动",
+            title = "快门震动",
             desc = "按下快门时震一下",
             checked = settings.shutterVibrate,
         ) { onChange(settings.copy(shutterVibrate = it)) }
@@ -238,7 +240,7 @@ fun SettingsScreen(
         Spacer(Modifier.height(10.dp))
 
         SwitchRow(
-            title = "提示音",
+            title = "快门提示音",
             desc = "按下快门时响一声。跟随系统媒体音量，静音模式下不响。",
             checked = settings.shutterSound,
         ) { onChange(settings.copy(shutterSound = it)) }
@@ -246,9 +248,8 @@ fun SettingsScreen(
         Spacer(Modifier.height(10.dp))
 
         SwitchRow(
-            title = "拍完停一下",
-            desc = "每拍一张先停在预览上：拍错了当场重拍，还能顺手写句备注。" +
-                "备注用系统输入法，想说话就点输入法的麦克风。",
+            title = "拍完停顿",
+            desc = "每拍一张先停在预览上，可以重拍，也可以写句备注",
             checked = settings.confirmEachShot,
         ) { onChange(settings.copy(confirmEachShot = it)) }
 
@@ -257,15 +258,13 @@ fun SettingsScreen(
 
         SwitchRow(
             title = "取景时扫码",
-            desc = "边取景边识别画面里的条码或二维码，扫到的内容写进照片元数据。不用扫码的活儿可以关掉省电。",
+            desc = "边取景边识别画面里的条码或二维码，显示在取景框上",
             checked = settings.scanInViewfinder,
         ) { onChange(settings.copy(scanInViewfinder = it)) }
 
         SwitchRow(
             title = "自由拍摄也扫码",
-            desc = "没走流程随手拍的照片也顺带扫一遍，只认二维码和条形码，" +
-                "不跑板子上那种点阵丝印码 —— 那套要多跑七八趟，随手拍的图多半没有码，白烧电。" +
-                "点阵丝印码请在项目详情里框选或批量扫码。走流程时这个开关不起作用，听测试项配置的。",
+            desc = "没选流程时，拍完对照片扫一遍二维码和条形码。选了流程就按流程里每一步的设置来",
             checked = settings.scanFreeShots,
         ) { onChange(settings.copy(scanFreeShots = it)) }
 
@@ -274,15 +273,14 @@ fun SettingsScreen(
 
         SwitchRow(
             title = "记录 GPS 位置",
-            desc = "车间在室内基本收不到卫星信号，多半是空的。需要定位权限。",
+            desc = "给照片写入 GPS 经纬度，需要定位权限",
             checked = settings.recordGps,
         ) { onChange(settings.copy(recordGps = it)) }
 
         Spacer(Modifier.height(20.dp))
         Text(
-            "无论水印开不开，每张照片都会写入：唯一 ID、拍摄时间、手机型号和系统版本、" +
-                "序列号、控制器型号、平台、故障类型、SOP 步骤序号和名称。" +
-                "所以以后想重新排版水印，照着元数据批量重烧就行。",
+            "每张照片都会写入：唯一 ID、拍摄时间、手机型号和系统版本，" +
+                "以及序列号、分类、标签和流程步骤。",
             color = Steel,
             fontSize = 13.sp,
             lineHeight = 20.sp,
@@ -318,7 +316,11 @@ private fun SwitchRow(
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(Modifier.weight(1f).padding(end = 14.dp)) {
+        Column(
+            Modifier
+                .weight(1f)
+                .padding(end = 14.dp)
+        ) {
             Text(title, color = Color.White, fontSize = 16.sp)
             Spacer(Modifier.height(5.dp))
             Text(desc, color = Steel, fontSize = 12.sp, lineHeight = 18.sp)

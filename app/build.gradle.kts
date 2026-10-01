@@ -14,11 +14,24 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1-stage1"
+        // 桌面图标下面的名字。走占位符而不是 @string/app_name，是为了下面调试版能换个名
+        manifestPlaceholders["appLabel"] = "SOP Camera"
     }
 
     buildTypes {
         debug {
             isMinifyEnabled = false
+            // 本机（Mac 上的 Android Studio）打的调试包换个包名，跟手机上 CI 打的那个并排装。
+            //
+            // 两边都是 debug 包，但签名不同：CI 用 GitHub 那台机器的调试签名，本机用
+            // ~/.android/debug.keystore。同包名覆盖安装会被系统拒绝，Studio 会提议
+            // 「卸载后重装」—— 一卸载 App 私有目录就清空，手建的流程、设置、同步下来的配置全没。
+            //
+            // GitHub Actions 会设 CI 这个环境变量，靠它区分：CI 打的包包名不变，照常覆盖安装
+            if (System.getenv("CI") == null) {
+                applicationIdSuffix = ".dev"
+                manifestPlaceholders["appLabel"] = "SOP Dev"
+            }
         }
         release {
             isMinifyEnabled = false   // 阶段一先不混淆，等功能稳了再开
