@@ -209,7 +209,7 @@ fun ProjectsScreen(
             if (shown.isEmpty()) {
                 Text(
                     if (all.isEmpty())
-                        "还没有归档。拍照时如果开着「同时保存无水印原图」，每个控制器会自动建一个项目。"
+                        "还没有归档。拍照时如果开着「同时保存无水印原图」，每个序列号会自动建一个项目。"
                     else "没有匹配的项目，换个关键词或者取消筛选试试。",
                     color = Steel,
                     fontSize = 14.sp,
@@ -264,7 +264,7 @@ fun ProjectsScreen(
         if (confirmWipe) {
             ConfirmTypedDialog(
                 title = "删除 ${selected.size} 个项目",
-                detail = "这些控制器的原图和水印照片会一起清空，之后再也重烧不出来。" +
+                detail = "这些项目的原图和水印照片会一起清空，之后再也重烧不出来。" +
                     "只想清相册的话，用「删除水印图片」。",
                 actionLabel = "删除",
                 onCancel = { confirmWipe = false },
@@ -372,7 +372,7 @@ private fun ProjectRow(
             Spacer(Modifier.height(5.dp))
             val tags = listOf(p.model, p.platform, p.fault).filter { it.isNotBlank() }
             Text(
-                if (tags.isEmpty()) "未标注型号" else tags.joinToString(" · "),
+                if (tags.isEmpty()) "未分类" else tags.joinToString(" · "),
                 color = Steel,
                 fontSize = 12.sp,
                 maxLines = 1,
@@ -641,7 +641,7 @@ private fun SearchRow(query: String, onQuery: (String) -> Unit, onScan: () -> Un
     ) {
         Box(Modifier.weight(1f)) {
             if (query.isEmpty()) {
-                Text("搜序列号、型号、平台、故障", color = Color(0xFF4A525C), fontSize = 14.sp)
+                Text("搜序列号、分类、标签", color = Color(0xFF4A525C), fontSize = 14.sp)
             }
             BasicTextField(
                 value = query,

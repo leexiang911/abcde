@@ -92,10 +92,12 @@ fun SettingsScreen(
         ) { onChange(settings.copy(showSopStep = it)) }
 
         Spacer(Modifier.height(10.dp))
+        // 别在这儿写「能识别图片有没有被改过」：元数据是普通 XMP，没有哈希也没有签名，
+        // 图改完把元数据原样写回去，谁也发现不了。要做防篡改得另加原图哈希（防手滑）
+        // 或签名（防人），做之前这句承诺不能出现在界面上
         Text(
-            "时间水印、SOP水印 默认是写到图片元数据" +
-                    "即使不显示内容，也能后续恢复，能识别图片数据有没有被更改，ai时代下保证图片真实性" +
-                    "水印总开关在相机界面的田字格里，随手就能关。",
+            "水印的内容同时写进照片元数据，水印关了也不丢，以后可以照着元数据重新烧水印。" +
+                "水印总开关在相机界面的田字格里，随手就能关。",
             color = Steel,
             fontSize = 12.sp,
             lineHeight = 19.sp,
@@ -131,7 +133,7 @@ fun SettingsScreen(
 
         SwitchRow(
             title = "同时保存无水印原图",
-            desc = "存到 Documents/SOP归档，不进相册。水印照片删了能从这里恢复。",
+            desc = "存到 Documents/SOP归档，不进相册。水印照片删了能从这里恢复，代价是占用空间翻倍。",
             checked = settings.keepOriginal,
         ) { onChange(settings.copy(keepOriginal = it)) }
 
@@ -140,9 +142,9 @@ fun SettingsScreen(
 
         var url by remember(settings.configUrl) { mutableStateOf(settings.configUrl) }
 
+        // 地址填后台的 /c/index.json。流程、分类目录、标签和提示图都从那儿下
         Text(
-//            填 index.json 的地址。流程、型号目录、故障类型和提示图都从那儿下载，
-            "从网站服务器导入SOP配置",
+            "从网站服务器导入 SOP 配置",
             color = Steel, fontSize = 12.sp, lineHeight = 18.sp
         )
         Spacer(Modifier.height(8.dp))
@@ -156,7 +158,7 @@ fun SettingsScreen(
         ) {
             if (url.isEmpty()) {
                 Text(
-                    "SOP流程配置 URL 链接",
+                    "SOP 流程配置的 URL 链接",
                     color = Color(0xFF4A525C), fontSize = 12.sp, maxLines = 1
                 )
             }
@@ -239,7 +241,7 @@ fun SettingsScreen(
 
         SwitchRow(
             title = "快门提示音",
-            desc = "快门提示音",
+            desc = "按下快门时响一声。跟随系统媒体音量，静音模式下不响。",
             checked = settings.shutterSound,
         ) { onChange(settings.copy(shutterSound = it)) }
 
@@ -247,7 +249,7 @@ fun SettingsScreen(
 
         SwitchRow(
             title = "拍完停顿",
-            desc = "预览刚拍照片｜备注｜撤销",
+            desc = "每拍一张先停在预览上，可以重拍，也可以写句备注",
             checked = settings.confirmEachShot,
         ) { onChange(settings.copy(confirmEachShot = it)) }
 
@@ -256,13 +258,13 @@ fun SettingsScreen(
 
         SwitchRow(
             title = "取景时扫码",
-            desc = "边取景边识别画面里的条码或二维码，放到取景框。",
+            desc = "边取景边识别画面里的条码或二维码，显示在取景框上",
             checked = settings.scanInViewfinder,
         ) { onChange(settings.copy(scanInViewfinder = it)) }
 
         SwitchRow(
             title = "自由拍摄也扫码",
-            desc = "拍完照片，自动对图片中条码，二维码取值",
+            desc = "没选流程时，拍完对照片扫一遍二维码和条形码。选了流程就按流程里每一步的设置来",
             checked = settings.scanFreeShots,
         ) { onChange(settings.copy(scanFreeShots = it)) }
 
@@ -271,14 +273,14 @@ fun SettingsScreen(
 
         SwitchRow(
             title = "记录 GPS 位置",
-            desc = "为照片写入GPS经纬度位置，需要定位权限",
+            desc = "给照片写入 GPS 经纬度，需要定位权限",
             checked = settings.recordGps,
         ) { onChange(settings.copy(recordGps = it)) }
 
         Spacer(Modifier.height(20.dp))
         Text(
-            "每张照片都会写入：唯一 ID、拍摄时间、手机型号和系统版本",
-//            所以以后想重新排版水印，验证图片是否真实（现在ai成本越来越低，图片容易被p图，如果p图，元数据HASH会被破坏
+            "每张照片都会写入：唯一 ID、拍摄时间、手机型号和系统版本，" +
+                "以及序列号、分类、标签和流程步骤。",
             color = Steel,
             fontSize = 13.sp,
             lineHeight = 20.sp,

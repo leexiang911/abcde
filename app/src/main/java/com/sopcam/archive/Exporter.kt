@@ -309,7 +309,7 @@ object Exporter {
                 putExtra(Intent.EXTRA_STREAM, uri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            ctx.startActivity(Intent.createChooser(intent, "发送检修留档"))
+            ctx.startActivity(Intent.createChooser(intent, "发送 SOP 留档"))
         }
     }
 }

@@ -406,18 +406,18 @@ class MainActivity : ComponentActivity() {
                     )
                     when (sheet) {
                         Sheet.MODEL -> PickerSheet(
-                            title = "控制器型号",
+                            title = "一级分类",
                             options = catalog.map { PickOption(it.id, it.name) },
                             selectedId = modelId,
                             onPick = { opt ->
                                 modelId = opt?.id ?: ""
-                                platformId = ""      // 换型号了，平台得重选
+                                platformId = ""      // 换了一级，二级得重选
                                 sheet = Sheet.NONE
                             },
                             onDismiss = { sheet = Sheet.NONE }
                         )
                         Sheet.PLATFORM -> PickerSheet(
-                            title = "分类平台",
+                            title = "二级分类",
                             options = activeModel?.platforms
                                 ?.map { PickOption(it.id, it.name, it.customer) } ?: emptyList(),
                             selectedId = platformId,
@@ -428,7 +428,7 @@ class MainActivity : ComponentActivity() {
                             onDismiss = { sheet = Sheet.NONE }
                         )
                         Sheet.FAULT -> PickerSheet(
-                            title = "故障类型",
+                            title = "标签",
                             options = faults.map { PickOption(it.id, it.name) },
                             selectedId = faultId,
                             onPick = { opt ->
@@ -438,7 +438,7 @@ class MainActivity : ComponentActivity() {
                             onDismiss = { sheet = Sheet.NONE }
                         )
                         Sheet.TEMPLATE -> PickerSheet(
-                            title = "检修流程",
+                            title = "SOP 流程",
                             options = templates.map {
                                 PickOption(it.id, it.name, "${it.steps.size} 个拍摄点位")
                             },
@@ -459,8 +459,8 @@ class MainActivity : ComponentActivity() {
                 }
 
                 Screen.SCAN -> ScanScreen(
-                    title = if (scanForSearch) "扫码搜索项目" else "扫控制器序列号",
-                    hint = "把板子上的码对进框里，识别到就自动回填",
+                    title = if (scanForSearch) "扫码搜索项目" else "扫项目序列号",
+                    hint = "把码对进框里，识别到就自动回填",
                     lastCode = scannedCode?.value,
                     bindPreview = ::bindScanner,
                     onCancel = {

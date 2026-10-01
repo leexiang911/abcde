@@ -834,7 +834,7 @@ private fun DeleteProjectDialog(
 
             ScopeOption(
                 title = "两份都删",
-                desc = "这个控制器的留档全部清空，不可恢复。",
+                desc = "这个项目的留档全部清空，不可恢复。",
                 tint = Ink,
                 bg = Color(0xFFE86A5C),
                 descTint = Color(0xFFE86A5C)
